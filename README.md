@@ -141,13 +141,38 @@ these artifacts: a Linux tarball, the Windows installer
   turn it off in Task Manager → *Startup apps*.)
 - **Linux**: **Settings → Start automatically at login** creates
   `~/.config/autostart/gundil-intercom.desktop`.
-- **Android**: not supported. Android doesn't let apps start themselves after
-  boot without a background service. Open the app once after the phone
-  restarts.
+- **Android**: see *Background mode on Android* below.
 
 Without the installer, you can do it by hand on Windows: press **Win+R**, type
 `shell:startup`, and put a shortcut to `gundil_intercom.exe` in that folder.
 Add `--minimized` to the shortcut's target if you want it to start minimized.
+
+### Background mode on Android
+
+By default Android pauses an app shortly after you leave it, so it stops
+receiving. To keep the intercom always listening:
+
+1. Open **⚙ Settings → Run in background**. Android shows a permanent
+   notification, *"Gundil Intercom is listening"*, which it requires for any
+   app that keeps running. Tap the notification to open the app.
+2. When asked, **allow unrestricted battery use**. Without this, Android cuts
+   the app's network while the screen is off.
+3. Optionally turn on **Start when phone turns on**, so the intercom starts
+   listening after a reboot without opening the app.
+
+In background mode the app keeps running after you press Back or swipe it out
+of recent apps. To stop it, turn **Run in background** off. Talking still
+needs the app open (hold the button). Receiving works with the screen off.
+
+Some phone brands (Xiaomi, Huawei, Oppo/Realme, Vivo, Samsung) have extra
+power savers. If the intercom still goes quiet, set the app's battery mode
+to *No restrictions* / *Unrestricted* and allow *Autostart* in the phone's
+settings. https://dontkillmyapp.com has steps for each brand.
+
+How it works: `android/.../IntercomService.kt` is a foreground service
+(`specialUse` type) that keeps one long-lived Flutter engine
+(`GundilApp.kt`) running and holds a partial wake lock and a Wi-Fi lock.
+`BootReceiver.kt` starts it after boot.
 
 Set `P2P_INTERCOM_PROFILE=<name>` to run several separate instances on the same
 computer, for example while testing.

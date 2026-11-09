@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../src/autostart.dart';
 import '../src/intercom_service.dart';
+import '../src/platform_bridge.dart';
 import '../src/protocol.dart';
 import '../src/settings.dart';
 import 'peer_dialog.dart';
@@ -72,7 +73,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Never leave the microphone open in the background.
     if (state != AppLifecycleState.resumed) service.stopTalking();
-    if (state == AppLifecycleState.detached) service.shutdown();
+    // On Android the engine may keep running without a window (background
+    // mode), so only desktop shuts down when the window goes away.
+    if (state == AppLifecycleState.detached && !Platform.isAndroid) {
+      service.shutdown();
+    }
   }
 
   /// Space bar = push-to-talk on desktop.
@@ -131,6 +136,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final addrs = await _localAddresses();
     final autostartWas = await Autostart.isEnabled();
     var autostart = autostartWas;
+    final backgroundWas = await PlatformBridge.getBackground();
+    var background = backgroundWas;
+    final bootWas = await PlatformBridge.getStartOnBoot();
+    var boot = bootWas;
     if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
@@ -168,6 +177,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     onChanged: (v) => setLocal(() => autostart = v),
                   ),
                 ],
+                if (Platform.isAndroid) ...[
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Run in background'),
+                    subtitle: const Text(
+                      'Keeps receiving when the app is closed or the screen '
+                      'is off. Shows a notification.',
+                    ),
+                    value: background,
+                    onChanged: (v) => setLocal(() {
+                      background = v;
+                      if (!v) boot = false;
+                    }),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Start when phone turns on'),
+                    subtitle: const Text('Needs "Run in background".'),
+                    value: boot,
+                    onChanged: background
+                        ? (v) => setLocal(() => boot = v)
+                        : null,
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
                 const SizedBox(height: 4),
@@ -194,6 +228,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (saved == true) {
+      if (background != backgroundWas) {
+        await _setBackground(background);
+      }
+      if (boot != bootWas) await PlatformBridge.setStartOnBoot(boot);
       if (autostart != autostartWas) {
         final now = await Autostart.setEnabled(autostart);
         if (now != autostart && mounted) {
@@ -212,6 +250,43 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     nameCtl.dispose();
     _focus.requestFocus();
+  }
+
+  /// Turns Android background mode on/off, asking for what it needs.
+  Future<void> _setBackground(bool on) async {
+    if (!on) {
+      await PlatformBridge.setBackground(false);
+      return;
+    }
+    // Android 13+: without this the notification is hidden (the service
+    // still runs).
+    await PlatformBridge.requestNotifications();
+    await PlatformBridge.setBackground(true);
+    if (!await PlatformBridge.isIgnoringBatteryOptimizations()) {
+      if (!mounted) return;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Allow unrestricted battery use?'),
+          content: const Text(
+            'To keep hearing other intercoms while the screen is off, Android '
+            'must not put Gundil Intercom to sleep. On the next screen, choose '
+            '"Allow".',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+      if (ok == true) await PlatformBridge.requestIgnoreBatteryOptimizations();
+    }
   }
 
   static Future<List<String>> _localAddresses() async {

@@ -26,6 +26,42 @@ class PlatformBridge {
   static Future<void> acquireMulticastLock() => _invoke('acquireMulticastLock');
   static Future<void> releaseMulticastLock() => _invoke('releaseMulticastLock');
 
+  // ------------------------------------------------- Android background mode
+
+  /// Whether the background service (persistent notification) is enabled.
+  static Future<bool> getBackground() => _get('getBackground');
+
+  /// Starts/stops the background service and remembers the choice.
+  static Future<bool> setBackground(bool enabled) =>
+      _get('setBackground', {'enabled': enabled});
+
+  /// Whether the background service starts after the phone boots.
+  static Future<bool> getStartOnBoot() => _get('getStartOnBoot');
+  static Future<bool> setStartOnBoot(bool enabled) =>
+      _get('setStartOnBoot', {'enabled': enabled});
+
+  /// Android 13+: permission to show the background notification.
+  static Future<bool> requestNotifications() => _get('requestNotifications');
+
+  static Future<bool> isIgnoringBatteryOptimizations() =>
+      _get('isIgnoringBatteryOptimizations');
+
+  /// Opens the system prompt to exempt the app from battery optimization,
+  /// so Android doesn't cut its network while the screen is off.
+  static Future<void> requestIgnoreBatteryOptimizations() =>
+      _invoke('requestIgnoreBatteryOptimizations');
+
+  static Future<bool> _get(String method, [Object? args]) async {
+    if (!_android) return false;
+    try {
+      return await _channel.invokeMethod<bool>(method, args) ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   static Future<void> _invoke(String method, [Object? args]) async {
     if (!_android) return;
     try {
