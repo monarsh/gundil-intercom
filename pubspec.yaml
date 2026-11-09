@@ -1,0 +1,22 @@
+name: p2p_intercom
+description: "Peer-to-peer LAN intercom over TCP/IP for Linux, Windows and Android."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  intercom_audio:
+    path: packages/intercom_audio
+  shared_preferences: ^2.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
