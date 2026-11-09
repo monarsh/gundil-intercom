@@ -20,8 +20,11 @@ answering and no chat. It's audio only.
 - **Half-duplex like a real radio**: only one person is heard at a time.
   Incoming audio is muted while you're transmitting, so there's no feedback.
 - **Roger beep**: a short chirp when the other side lets go.
-- **Starts with Windows (or Linux login)**: optional. The app opens minimized
-  at sign-in, so the intercom is always ready to receive.
+- **Starts with Windows (or Linux login)**: optional. On Windows it starts
+  in the system tray at sign-in, so the intercom is always ready to receive.
+- **Windows system tray**: minimize or close the window and it keeps running
+  in the notification area. Click the tray icon to open it, right-click it
+  for *Open* / *Exit*. Hover over it to see who's talking.
 - **Saved peers**: add a peer by IP (or keep a discovered one) and it stays in
   the list across restarts, greyed out while offline. The app keeps retrying
   in the background, so a saved peer comes online automatically. This also
@@ -132,11 +135,28 @@ these artifacts: a Linux tarball, the Windows installer
 6. Use a peer's **⋮** menu to **Edit** it (name, IP, port), **Rename** a
    discovered peer, **Keep in list**, or **Remove** it.
 
+### Windows system tray
+
+While Gundil Intercom runs, its icon is in the notification area (bottom
+right; Windows may tuck it under the **^** arrow at first. Drag it onto the
+taskbar to keep it visible).
+
+- **Minimize** or **close (X)**: the window hides to the tray and the
+  intercom keeps receiving. You get a one-time balloon saying so.
+- **Click** the tray icon: open the window.
+- **Right-click** the tray icon: **Open** / **Exit**. *Exit* really quits.
+- **Hover**: shows the status, e.g. "Gundil Intercom — Office-PC is talking".
+- Starting the app again while it's in the tray just opens the running window
+  (only one copy runs at a time).
+
+To have the X button quit the app instead, turn off **Settings → Minimize to
+tray**.
+
 ### Start automatically
 
 - **Windows**: tick *"Start Gundil Intercom automatically when I sign in"* in
   the installer, or turn on **Settings → Start with Windows** in the app
-  later. It starts minimized in the taskbar. (This uses the per-user
+  later. It starts hidden in the system tray. (This uses the per-user
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry. You can also
   turn it off in Task Manager → *Startup apps*.)
 - **Linux**: **Settings → Start automatically at login** creates

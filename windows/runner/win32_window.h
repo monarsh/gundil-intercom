@@ -42,6 +42,8 @@ class Win32Window {
   // When set before the first |Show|, the window starts minimized to the
   // taskbar without taking focus (used for autostart at sign-in).
   void SetStartMinimized(bool minimized) { start_minimized_ = minimized; }
+  bool StartMinimized() const { return start_minimized_; }
+  void ConsumeStartMinimized() { start_minimized_ = false; }
 
   // Release OS resources associated with window.
   void Destroy();

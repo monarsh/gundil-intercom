@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cwchar>
+#include <string>
 
 #include "flutter_window.h"
 #include "utils.h"
@@ -13,6 +15,35 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
     CreateAndAttachConsole();
+  }
+
+  // Single instance: if Gundil Intercom is already running (maybe hidden in
+  // the tray), bring that window up instead of starting a second copy with
+  // the same identity. P2P_INTERCOM_PROFILE (developer option) gets its own
+  // instance per profile.
+  std::wstring mutex_name = L"Local\\GundilIntercom.SingleInstance";
+  wchar_t profile[128] = {0};
+  if (::GetEnvironmentVariableW(L"P2P_INTERCOM_PROFILE", profile, 128) > 0) {
+    mutex_name += L".";
+    mutex_name += profile;
+  }
+  HANDLE instance_mutex = ::CreateMutexW(nullptr, TRUE, mutex_name.c_str());
+  if (instance_mutex != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing =
+        ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"Gundil Intercom");
+    if (existing != nullptr) {
+      DWORD pid = 0;
+      ::GetWindowThreadProcessId(existing, &pid);
+      ::AllowSetForegroundWindow(pid);
+      // A second autostart launch must not pop the window up.
+      bool minimized_launch = wcsstr(command_line, L"--minimized") != nullptr;
+      if (!minimized_launch) {
+        ::PostMessageW(existing,
+                       ::RegisterWindowMessageW(kShowWindowMessageName), 0, 0);
+      }
+    }
+    ::CloseHandle(instance_mutex);
+    return EXIT_SUCCESS;
   }
 
   // Initialize COM, so that it is available for use in the library and/or
@@ -46,5 +77,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   ::CoUninitialize();
+  if (instance_mutex != nullptr) {
+    ::ReleaseMutex(instance_mutex);
+    ::CloseHandle(instance_mutex);
+  }
   return EXIT_SUCCESS;
 }

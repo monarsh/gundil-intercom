@@ -9,6 +9,7 @@ import '../src/intercom_service.dart';
 import '../src/platform_bridge.dart';
 import '../src/protocol.dart';
 import '../src/settings.dart';
+import '../src/window_bridge.dart';
 import 'peer_dialog.dart';
 import 'peer_list.dart';
 import 'ptt_panel.dart';
@@ -136,6 +137,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final addrs = await _localAddresses();
     final autostartWas = await Autostart.isEnabled();
     var autostart = autostartWas;
+    final trayWas = widget.settings.minimizeToTray;
+    var tray = trayWas;
     final backgroundWas = await PlatformBridge.getBackground();
     var background = backgroundWas;
     final bootWas = await PlatformBridge.getStartOnBoot();
@@ -170,13 +173,29 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           ? 'Start with Windows'
                           : 'Start automatically at login',
                     ),
-                    subtitle: const Text(
-                      'Opens minimized when you sign in, ready to receive.',
+                    subtitle: Text(
+                      Platform.isWindows
+                          ? 'Starts in the system tray when you sign in, '
+                                'ready to receive.'
+                          : 'Opens minimized when you log in, ready to '
+                                'receive.',
                     ),
                     value: autostart,
                     onChanged: (v) => setLocal(() => autostart = v),
                   ),
                 ],
+                if (WindowBridge.supported)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Minimize to tray'),
+                    subtitle: const Text(
+                      'Minimize and the close button keep it running in the '
+                      'notification area. Right-click the tray icon > Exit '
+                      'to quit.',
+                    ),
+                    value: tray,
+                    onChanged: (v) => setLocal(() => tray = v),
+                  ),
                 if (Platform.isAndroid) ...[
                   const SizedBox(height: 8),
                   SwitchListTile(
@@ -228,6 +247,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (saved == true) {
+      if (tray != trayWas) {
+        widget.settings.minimizeToTray = tray;
+        await WindowBridge.setTrayEnabled(tray);
+      }
       if (background != backgroundWas) {
         await _setBackground(background);
       }

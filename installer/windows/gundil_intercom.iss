@@ -54,7 +54,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-Name: "autostart"; Description: "Start {#MyAppName} automatically when I sign in to Windows (minimized)"; GroupDescription: "Startup:"; Flags: checkedonce
+Name: "autostart"; Description: "Start {#MyAppName} automatically when I sign in to Windows (in the system tray)"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [InstallDelete]
 ; Upgrading from "P2P Intercom": remove the old executable and shortcuts.
@@ -84,4 +84,6 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""{
 Filename: "{app}\{#MyAppExe}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
+; The app may be running hidden in the tray: close it so files can be removed.
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExe} /F"; Flags: runhidden waituntilterminated; RunOnceId: "CloseApp"
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FirewallRule}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveFirewallRule"

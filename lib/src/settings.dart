@@ -69,6 +69,10 @@ class Settings {
       (_p.isEmpty ? _defaultName() : _p.substring(0, _p.length - 1));
   set name(String v) => _prefs.setString('${_p}name', v);
 
+  /// Windows: minimize / close hide the window to the system tray.
+  bool get minimizeToTray => _prefs.getBool('${_p}minimizeToTray') ?? true;
+  set minimizeToTray(bool v) => _prefs.setBool('${_p}minimizeToTray', v);
+
   /// Peers the user saved; they stay in the list across restarts.
   List<SavedPeer> get savedPeers {
     final raw = _prefs.getString('${_p}savedPeers');
