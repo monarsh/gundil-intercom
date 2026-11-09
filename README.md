@@ -86,6 +86,19 @@ flutter build windows --release
 build\windows\x64\runner\Release\p2p_intercom.exe
 ```
 
+To build the installer (`setup.exe`) as well, install
+[Inno Setup 6](https://jrsoftware.org/isinfo.php) and run:
+
+```powershell
+iscc /DMyAppVersion=1.0.0 installer\windows\p2p_intercom.iss
+# -> build\installer\p2p-intercom-setup-1.0.0.exe
+```
+
+The installer puts the app in Program Files, adds a Start-menu shortcut (a
+desktop shortcut is optional) and a Windows Firewall rule for the intercom's
+ports, and registers a normal uninstaller. CI copies the Visual C++ runtime
+DLLs into the bundle, so the app also runs on a fresh Windows install.
+
 **Android** (needs the Android SDK with the NDK; minSdk 24):
 
 ```bash
@@ -94,7 +107,8 @@ adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
 Every push runs `.github/workflows/build.yml`, which tests the code and uploads
-Linux, Windows and Android builds as artifacts.
+these artifacts: a Linux tarball, the Windows installer
+(`p2p-intercom-windows-setup`), a portable Windows folder, and Android APKs.
 
 ## Usage
 

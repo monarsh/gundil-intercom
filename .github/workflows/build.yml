@@ -45,9 +45,28 @@ jobs:
           channel: stable
           cache: true
       - run: flutter build windows --release
+      - name: Bundle Visual C++ runtime (app-local)
+        shell: pwsh
+        run: |
+          $dst = "build\windows\x64\runner\Release"
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item "$env:WINDIR\System32\$dll" $dst
+          }
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DMyAppVersion=$ver" installer\windows\p2p_intercom.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-intercom-windows-x64
+          name: p2p-intercom-windows-setup
+          path: build/installer/*.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: p2p-intercom-windows-x64-portable
           path: build/windows/x64/runner/Release/
 
   android:
