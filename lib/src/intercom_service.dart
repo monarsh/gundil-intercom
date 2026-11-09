@@ -36,7 +36,11 @@ class IntercomService extends ChangeNotifier {
     this.discoveryUdpPort = discoveryPort,
     this.sampleRate = defaultSampleRate,
     this.rogerBeep = true,
-  }) : _name = name; // ignore: prefer_initializing_formals
+    List<SavedPeer> savedPeers = const [],
+    this.onSavedPeersChanged,
+    this.reconnectInterval = const Duration(seconds: 5),
+  }) : _name = name, // ignore: prefer_initializing_formals
+       _saved = [...savedPeers];
 
   final String selfId;
   final AudioEngine audio;
@@ -47,6 +51,12 @@ class IntercomService extends ChangeNotifier {
 
   /// Play a short "over" chirp when a remote transmission ends.
   final bool rogerBeep;
+
+  /// Called whenever the saved peer list changes, so it can be persisted.
+  final void Function(List<SavedPeer> saved)? onSavedPeersChanged;
+
+  /// How often offline saved peers are retried.
+  final Duration reconnectInterval;
 
   /// How often captured audio is sent.
   static const Duration frameDuration = Duration(milliseconds: 20);
@@ -69,6 +79,10 @@ class IntercomService extends ChangeNotifier {
   ServerSocket? _server;
   Discovery? _discovery;
   Timer? _housekeeping;
+  Timer? _reconnect;
+
+  final List<SavedPeer> _saved;
+  final Set<String> _savedConnecting = {};
 
   final Map<String, Peer> _peers = {};
   final Map<String, PeerConnection> _links = {};
@@ -112,22 +126,43 @@ class IntercomService extends ChangeNotifier {
 
   Peer? peer(String id) => _peers[id];
 
-  /// Peers sorted: online first, then by name.
-  List<Peer> get peers {
-    final list = _peers.values.toList();
-    list.sort((a, b) {
+  /// Saved peers, in the order they were added.
+  List<SavedPeer> get savedPeers => List.unmodifiable(_saved);
+
+  /// Everything to show in the peer list: saved peers (online or not) plus
+  /// discovered peers that aren't saved. Online first, then by name.
+  List<PeerEntry> get entries {
+    final out = <PeerEntry>[];
+    final shown = <String>{};
+    for (final s in _saved) {
+      final live = s.peerId == null ? null : _peers[s.peerId];
+      if (live != null) shown.add(live.id);
+      out.add(PeerEntry(saved: s, live: live));
+    }
+    for (final p in _peers.values) {
+      if (!shown.contains(p.id)) out.add(PeerEntry(live: p));
+    }
+    out.sort((a, b) {
       if (a.online != b.online) return a.online ? -1 : 1;
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
-    return list;
+    return out;
   }
 
   List<Peer> get onlinePeers => _peers.values.where((p) => p.online).toList();
 
+  /// Name to show for a peer: the user's label if saved, else its own name.
+  String displayName(String peerId) {
+    for (final s in _saved) {
+      if (s.peerId == peerId && s.label.trim().isNotEmpty) return s.label;
+    }
+    return _peers[peerId]?.name ?? 'Unknown';
+  }
+
   /// Human readable name of [target].
   String targetName(TalkTarget t) => switch (t) {
     EveryoneTarget() => 'Everyone',
-    PeerTarget(:final peerId) => _peers[peerId]?.name ?? 'Unknown',
+    PeerTarget(:final peerId) => displayName(peerId),
   };
 
   // -------------------------------------------------------------- lifecycle
@@ -174,6 +209,8 @@ class IntercomService extends ChangeNotifier {
       }
       notifyListeners();
     });
+    _reconnect = Timer.periodic(reconnectInterval, (_) => _retrySaved());
+    _retrySaved();
     notifyListeners();
   }
 
@@ -183,6 +220,7 @@ class IntercomService extends ChangeNotifier {
     _shutDown = true;
     stopTalking();
     _housekeeping?.cancel();
+    _reconnect?.cancel();
     _speakerCloser?.cancel();
     _closeSpeaker();
     await _discovery?.dispose();
@@ -220,31 +258,185 @@ class IntercomService extends ChangeNotifier {
 
   // ---------------------------------------------------------------- peers
 
-  /// Adds a peer by IP address/hostname (for networks that block broadcast).
-  Future<Peer> addManualPeer(String host, {int port = defaultTcpPort}) async {
-    final addresses = await InternetAddress.lookup(host);
-    if (addresses.isEmpty) throw SocketException('Cannot resolve $host');
-    final conn = await PeerConnection.connect(addresses.first, port);
-    final helloSeen = Completer<String>();
-    _adopt(
-      conn,
-      onHello: (id) {
-        if (!helloSeen.isCompleted) helloSeen.complete(id);
-      },
+  /// Saves a peer by IP address/hostname. It stays in the list (offline
+  /// when unreachable) until removed, and is retried in the background.
+  /// Returns true if it could be reached right now.
+  Future<bool> addSavedPeer({
+    required String host,
+    int port = defaultTcpPort,
+    String label = '',
+  }) async {
+    final h = host.trim();
+    if (h.isEmpty) throw ArgumentError('Host is empty');
+    if (_saved.any((s) => s.host == h && s.port == port)) {
+      throw ArgumentError('$h:$port is already in the list');
+    }
+    final s = SavedPeer(
+      key: _newKey(),
+      host: h,
+      port: port,
+      label: label.trim(),
     );
-    final id = await helloSeen.future.timeout(
-      const Duration(seconds: 5),
-      onTimeout: () {
-        conn.close();
-        throw TimeoutException('$host:$port is not an intercom peer');
-      },
+    _saved.add(s);
+    _savedChanged();
+    return _tryConnectSaved(s);
+  }
+
+  /// Saves a discovered peer (e.g. to give it a custom name).
+  SavedPeer saveLivePeer(String peerId, {String label = ''}) {
+    final existing = _saved.where((s) => s.peerId == peerId).firstOrNull;
+    if (existing != null) return existing;
+    final p = _peers[peerId];
+    if (p == null) throw ArgumentError('Unknown peer $peerId');
+    final s = SavedPeer(
+      key: _newKey(),
+      host: p.address.address,
+      port: p.port,
+      label: label.trim(),
+      peerId: peerId,
     );
-    final p = _peers[id]!;
-    p.manual = true;
-    p.address = addresses.first;
-    p.port = port;
+    _saved.add(s);
+    _savedChanged();
+    return s;
+  }
+
+  /// Edits a saved peer. Changing the address reconnects to it.
+  Future<bool> updateSavedPeer(
+    String key, {
+    String? label,
+    String? host,
+    int? port,
+  }) async {
+    final s = _saved.where((e) => e.key == key).firstOrNull;
+    if (s == null) return false;
+    if (label != null) s.label = label.trim();
+    final newHost = host?.trim();
+    final addressChanged =
+        (newHost != null && newHost.isNotEmpty && newHost != s.host) ||
+        (port != null && port != s.port);
+    if (addressChanged) {
+      if (_saved.any(
+        (o) =>
+            o != s &&
+            o.host == (newHost ?? s.host) &&
+            o.port == (port ?? s.port),
+      )) {
+        throw ArgumentError(
+          '${newHost ?? s.host}:${port ?? s.port} is already in the list',
+        );
+      }
+      if (newHost != null && newHost.isNotEmpty) s.host = newHost;
+      if (port != null) s.port = port;
+      // May now point at a different device; learn its id again.
+      s.peerId = null;
+    }
+    _savedChanged();
+    if (addressChanged) return _tryConnectSaved(s);
+    return _peers[s.peerId]?.online ?? false;
+  }
+
+  /// Removes a saved peer from the list (a discovered peer reappears as
+  /// unsaved while it's online).
+  void removeSavedPeer(String key) {
+    _saved.removeWhere((s) => s.key == key);
+    _savedChanged();
+  }
+
+  void _savedChanged() {
+    onSavedPeersChanged?.call(savedPeers);
     notifyListeners();
-    return p;
+  }
+
+  static final math.Random _rng = math.Random();
+  static String _newKey() =>
+      '${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}'
+      '${_rng.nextInt(1 << 30).toRadixString(36)}';
+
+  void _retrySaved() {
+    for (final s in _saved) {
+      final live = s.peerId == null ? null : _peers[s.peerId];
+      if (live != null && live.online) continue;
+      _tryConnectSaved(s);
+    }
+  }
+
+  /// Connects to a saved peer and learns its id. Never throws.
+  Future<bool> _tryConnectSaved(SavedPeer s) async {
+    if (_shutDown || !_savedConnecting.add(s.key)) return false;
+    PeerConnection? conn;
+    try {
+      final addrs = await InternetAddress.lookup(
+        s.host,
+      ).timeout(const Duration(seconds: 3));
+      if (addrs.isEmpty) return false;
+      conn = await PeerConnection.connect(
+        addrs.first,
+        s.port,
+        timeout: const Duration(seconds: 3),
+      );
+      if (_shutDown) {
+        conn.close();
+        return false;
+      }
+      final hello = Completer<String>();
+      _adopt(
+        conn,
+        onHello: (id) {
+          if (!hello.isCompleted) hello.complete(id);
+        },
+      );
+      final id = await hello.future.timeout(const Duration(seconds: 4));
+      if (!_saved.contains(s)) return true; // Removed meanwhile.
+      if (s.peerId != id) {
+        s.peerId = id;
+        _savedChanged();
+      }
+      final live = _peers[id];
+      if (live != null) _resolveSaved(live);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      conn?.close();
+      return false;
+    } finally {
+      _savedConnecting.remove(s.key);
+    }
+  }
+
+  /// Keeps saved peers in sync with a live peer [p]:
+  /// * links saved entries that don't know their device id yet when the
+  ///   address matches (e.g. discovered before we connected to it);
+  /// * for entries linked to [p], refreshes the platform and — when the saved
+  ///   host is an IP address — the address, so reconnecting keeps working
+  ///   after the device gets a new IP or port.
+  void _resolveSaved(Peer p) {
+    var changed = false;
+    for (final s in _saved) {
+      if (s.peerId == null &&
+          s.host == p.address.address &&
+          s.port == p.port &&
+          !_saved.any((o) => o.peerId == p.id)) {
+        s.peerId = p.id;
+        changed = true;
+      }
+      if (s.peerId != p.id) continue;
+      if (s.platform != p.platform && p.platform != '?') {
+        s.platform = p.platform;
+        changed = true;
+      }
+      final isIp = InternetAddress.tryParse(s.host) != null;
+      if (isIp &&
+          p.online &&
+          (s.host != p.address.address || s.port != p.port) &&
+          !_saved.any(
+            (o) => o != s && o.host == p.address.address && o.port == p.port,
+          )) {
+        s.host = p.address.address;
+        s.port = p.port;
+        changed = true;
+      }
+    }
+    if (changed) _savedChanged();
   }
 
   void _onBeacon(DiscoveryBeacon b) {
@@ -285,6 +477,7 @@ class IntercomService extends ChangeNotifier {
         ..address = address
         ..port = port;
       if (changed) notifyListeners();
+      _resolveSaved(existing);
       return existing;
     }
     final p = Peer(
@@ -295,6 +488,7 @@ class IntercomService extends ChangeNotifier {
       port: port,
     );
     _peers[id] = p;
+    _resolveSaved(p);
     notifyListeners();
     return p;
   }
@@ -381,6 +575,7 @@ class IntercomService extends ChangeNotifier {
       final current = _links[id];
       if (current == null || current.isClosed) _links[id] = c;
       p.connected = true;
+      _resolveSaved(p);
       onHello?.call(id);
       notifyListeners();
       return;

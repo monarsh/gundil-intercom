@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../src/models.dart';
-
 IconData platformIcon(String platform) => switch (platform) {
   'android' => Icons.phone_android,
   'windows' => Icons.desktop_windows,
@@ -22,25 +20,31 @@ String platformLabel(String platform) => switch (platform) {
 
 /// Round avatar with the peer's initial and a presence dot.
 class PeerAvatar extends StatelessWidget {
-  const PeerAvatar({super.key, required this.peer, this.radius = 22});
+  const PeerAvatar({
+    super.key,
+    required this.name,
+    required this.online,
+    this.radius = 22,
+  });
 
-  final Peer peer;
+  final String name;
+  final bool online;
   final double radius;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final initial = peer.name.isEmpty ? '?' : peer.name[0].toUpperCase();
+    final initial = name.isEmpty ? '?' : name[0].toUpperCase();
     final dot = radius * 0.55;
     return Stack(
       clipBehavior: Clip.none,
       children: [
         CircleAvatar(
           radius: radius,
-          backgroundColor: peer.online
+          backgroundColor: online
               ? scheme.primaryContainer
               : scheme.surfaceContainerHighest,
-          foregroundColor: peer.online
+          foregroundColor: online
               ? scheme.onPrimaryContainer
               : scheme.onSurfaceVariant,
           child: Text(initial, style: TextStyle(fontSize: radius * 0.8)),
@@ -52,7 +56,7 @@ class PeerAvatar extends StatelessWidget {
             width: dot,
             height: dot,
             decoration: BoxDecoration(
-              color: peer.online ? Colors.green : scheme.outline,
+              color: online ? Colors.green : scheme.outline,
               shape: BoxShape.circle,
               border: Border.all(color: scheme.surface, width: 2),
             ),

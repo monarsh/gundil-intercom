@@ -8,7 +8,6 @@ class Peer {
     required this.platform,
     required this.address,
     required this.port,
-    this.manual = false,
   });
 
   final String id;
@@ -16,9 +15,6 @@ class Peer {
   String platform;
   InternetAddress address;
   int port;
-
-  /// Added by hand (IP address) rather than discovered via broadcast.
-  bool manual;
 
   /// Last time we heard a discovery beacon from this peer.
   DateTime? lastBeacon;
@@ -35,6 +31,93 @@ class Peer {
   }
 
   String get endpoint => '${address.address}:$port';
+}
+
+/// A peer the user saved (added by IP, or a discovered peer they renamed).
+/// Saved peers are persisted and stay in the list across app restarts, even
+/// while offline.
+class SavedPeer {
+  SavedPeer({
+    required this.key,
+    required this.host,
+    required this.port,
+    this.label = '',
+    this.peerId,
+    this.platform = '?',
+  });
+
+  /// Stable local identifier of this list entry.
+  final String key;
+
+  /// Custom display name; empty means "use the name the peer announces".
+  String label;
+
+  /// IP address or hostname used to (re)connect.
+  String host;
+  int port;
+
+  /// The remote device id, learned on first successful connection.
+  String? peerId;
+
+  /// Last known OS of the peer (for the icon while it's offline).
+  String platform;
+
+  String get endpoint => '$host:$port';
+
+  Map<String, Object?> toJson() => {
+    'key': key,
+    'label': label,
+    'host': host,
+    'port': port,
+    if (peerId != null) 'peerId': peerId,
+    'platform': platform,
+  };
+
+  static SavedPeer? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final key = json['key'], host = json['host'], port = json['port'];
+    if (key is! String || host is! String || port is! int) return null;
+    return SavedPeer(
+      key: key,
+      host: host,
+      port: port,
+      label: (json['label'] as String?) ?? '',
+      peerId: json['peerId'] as String?,
+      platform: (json['platform'] as String?) ?? '?',
+    );
+  }
+}
+
+/// One row of the peer list: a saved peer, a live (discovered/connected)
+/// peer, or both when a saved peer is currently reachable.
+class PeerEntry {
+  PeerEntry({this.saved, this.live}) : assert(saved != null || live != null);
+
+  final SavedPeer? saved;
+  final Peer? live;
+
+  String get key => saved?.key ?? 'live:${live!.id}';
+  bool get isSaved => saved != null;
+
+  /// Remote device id, if known. Needed to talk to the peer.
+  String? get peerId => live?.id ?? saved?.peerId;
+
+  String get name {
+    final label = saved?.label.trim() ?? '';
+    if (label.isNotEmpty) return label;
+    return live?.name ?? saved!.host;
+  }
+
+  bool get online => live?.online ?? false;
+  String get platform => live?.platform ?? saved!.platform;
+
+  String get host {
+    final l = live;
+    if (l != null && (l.online || saved == null)) return l.address.address;
+    return saved!.host;
+  }
+
+  int get port => saved?.port ?? live!.port;
 }
 
 /// Who push-to-talk transmits to.

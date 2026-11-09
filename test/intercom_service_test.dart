@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -41,9 +42,18 @@ void main() {
     bob = node('bob-id', 'Bob', bobAudio);
     carol = node('carol-id', 'Carol', carolAudio);
     await Future.wait([alice.start(), bob.start(), carol.start()]);
-    await alice.addManualPeer('127.0.0.1', port: bob.listenPort!);
-    await alice.addManualPeer('127.0.0.1', port: carol.listenPort!);
-    await carol.addManualPeer('127.0.0.1', port: bob.listenPort!);
+    expect(
+      await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
+      isTrue,
+    );
+    expect(
+      await alice.addSavedPeer(host: '127.0.0.1', port: carol.listenPort!),
+      isTrue,
+    );
+    expect(
+      await carol.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
+      isTrue,
+    );
   });
 
   tearDown(() async {
@@ -52,6 +62,7 @@ void main() {
 
   test('peers learn each other on both sides', () async {
     expect(alice.peer('bob-id')!.name, 'Bob');
+    expect(alice.entries.map((e) => e.name), containsAll(['Bob', 'Carol']));
     await eventually(() => bob.peer('alice-id')?.name == 'Alice');
     await eventually(() => bob.peer('carol-id')?.online ?? false);
   });
@@ -165,6 +176,182 @@ void main() {
     await eventually(() => bob.incoming == null);
     alice = node('alice-id', 'Alice', aliceAudio);
     await alice.start();
+  });
+
+  group('saved peers', () {
+    Future<int> freePort() async {
+      final s = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final p = s.port;
+      await s.close();
+      return p;
+    }
+
+    IntercomService withSaved(
+      List<SavedPeer> saved,
+      void Function(List<SavedPeer>) onChange,
+    ) => IntercomService(
+      selfId: 'dave-id',
+      name: 'Dave',
+      audio: FakeAudioEngine(),
+      preferredPort: 0,
+      enableDiscovery: false,
+      savedPeers: saved,
+      onSavedPeersChanged: onChange,
+      reconnectInterval: const Duration(milliseconds: 200),
+    );
+
+    test(
+      'offline peer stays in the list and connects when it appears',
+      () async {
+        List<SavedPeer> persisted = [];
+        final dave = withSaved([], (l) => persisted = l);
+        await dave.start();
+        final port = await freePort();
+
+        final online = await dave.addSavedPeer(
+          host: '127.0.0.1',
+          port: port,
+          label: 'Gate',
+        );
+        expect(online, isFalse);
+        expect(persisted.single.label, 'Gate');
+        final e = dave.entries.single;
+        expect(e.name, 'Gate');
+        expect(e.online, isFalse);
+        expect(e.peerId, isNull);
+
+        // The peer comes online later: background retry links it.
+        final gate = IntercomService(
+          selfId: 'gate-id',
+          name: 'Gate PC',
+          audio: FakeAudioEngine(),
+          preferredPort: port,
+          enableDiscovery: false,
+        );
+        await gate.start();
+        await eventually(() => dave.entries.single.online);
+        expect(dave.entries.single.peerId, 'gate-id');
+        expect(dave.entries.single.name, 'Gate'); // label wins
+        expect(persisted.single.peerId, 'gate-id');
+        expect(dave.displayName('gate-id'), 'Gate');
+        await gate.shutdown();
+        await eventually(() => !dave.entries.single.online);
+        expect(dave.entries.length, 1); // still listed while offline
+        await dave.shutdown();
+      },
+    );
+
+    test('saved peers survive an app restart', () async {
+      List<SavedPeer> persisted = [];
+      final first = withSaved([], (l) => persisted = l);
+      await first.start();
+      await first.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!);
+      await first.addSavedPeer(
+        host: '10.255.255.1',
+        port: 47801,
+        label: 'Garage',
+      );
+      await first.shutdown();
+
+      // Round-trip through JSON like Settings does.
+      final restored = persisted
+          .map((s) => SavedPeer.fromJson(s.toJson())!)
+          .toList();
+      final second = withSaved(restored, (l) => persisted = l);
+      await second.start();
+      final names = second.entries.map((e) => e.name).toSet();
+      expect(names, containsAll(['Garage']));
+      expect(second.entries.length, 2);
+      await eventually(
+        () => second.entries.any((e) => e.peerId == 'bob-id' && e.online),
+      );
+      expect(
+        second.entries.firstWhere((e) => e.name == 'Garage').online,
+        isFalse,
+      );
+      await second.shutdown();
+    });
+
+    test('edit label and address; remove', () async {
+      final key = alice.entries
+          .firstWhere((e) => e.peerId == 'bob-id')
+          .saved!
+          .key;
+
+      await alice.updateSavedPeer(key, label: 'Front desk');
+      expect(alice.displayName('bob-id'), 'Front desk');
+      expect(alice.targetName(const PeerTarget('bob-id')), 'Front desk');
+
+      // Point the same entry at Carol's address instead.
+      final carolKey = alice.entries
+          .firstWhere((e) => e.peerId == 'carol-id')
+          .saved!
+          .key;
+      alice.removeSavedPeer(carolKey);
+      final ok = await alice.updateSavedPeer(
+        key,
+        host: '127.0.0.1',
+        port: carol.listenPort!,
+      );
+      expect(ok, isTrue);
+      final edited = alice.entries.firstWhere((e) => e.saved?.key == key);
+      expect(edited.peerId, 'carol-id');
+      expect(edited.name, 'Front desk');
+
+      // Bob is still connected, so he shows as an unsaved live peer.
+      expect(
+        alice.entries.any((e) => e.peerId == 'bob-id' && !e.isSaved),
+        isTrue,
+      );
+
+      alice.removeSavedPeer(key);
+      expect(alice.savedPeers, isEmpty);
+    });
+
+    test('saved address follows the peer to a new IP/port', () async {
+      List<SavedPeer> persisted = [];
+      // Saved from an earlier session when Bob was on another port.
+      final stale = SavedPeer(
+        key: 'k1',
+        host: '127.0.0.1',
+        port: await freePort(),
+        label: 'Bob desk',
+        peerId: 'bob-id',
+      );
+      final dave = withSaved([stale], (l) => persisted = l);
+      await dave.start();
+      expect(dave.entries.single.online, isFalse);
+      expect(dave.entries.single.platform, '?');
+
+      // Bob reaches Dave (e.g. via discovery or his own saved list).
+      await bob.addSavedPeer(host: '127.0.0.1', port: dave.listenPort!);
+      await eventually(() => dave.entries.single.online);
+      expect(dave.entries.length, 1);
+      expect(dave.entries.single.name, 'Bob desk');
+      expect(persisted.single.port, bob.listenPort);
+      expect(persisted.single.platform, Platform.operatingSystem);
+      await dave.shutdown();
+    });
+
+    test('duplicate addresses are rejected', () async {
+      expect(
+        () => alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
+        throwsArgumentError,
+      );
+    });
+
+    test('a discovered peer can be kept and renamed', () async {
+      // Bob only knows Alice because she connected to him.
+      await eventually(() => bob.entries.any((e) => e.peerId == 'alice-id'));
+      final e = bob.entries.firstWhere((e) => e.peerId == 'alice-id');
+      expect(e.isSaved, isFalse);
+      bob.saveLivePeer('alice-id', label: 'Boss');
+      final saved = bob.entries.firstWhere((e) => e.peerId == 'alice-id');
+      expect(saved.isSaved, isTrue);
+      expect(saved.name, 'Boss');
+      expect(saved.saved!.host, '127.0.0.1');
+      expect(bob.entries.where((e) => e.peerId == 'alice-id').length, 1);
+    });
   });
 
   test('rmsLevel and roger tone', () {

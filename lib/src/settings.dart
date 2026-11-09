@@ -1,7 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'models.dart';
+import 'protocol.dart';
 
 /// Persistent user settings.
 ///
@@ -40,11 +44,42 @@ class Settings {
       (_p.isEmpty ? _defaultName() : _p.substring(0, _p.length - 1));
   set name(String v) => _prefs.setString('${_p}name', v);
 
-  /// Manually added peers as "host:port" strings.
-  List<String> get manualPeers =>
-      _prefs.getStringList('${_p}manualPeers') ?? [];
-  set manualPeers(List<String> v) =>
-      _prefs.setStringList('${_p}manualPeers', v);
+  /// Peers the user saved; they stay in the list across restarts.
+  List<SavedPeer> get savedPeers {
+    final raw = _prefs.getString('${_p}savedPeers');
+    if (raw != null) {
+      try {
+        final list = jsonDecode(raw);
+        if (list is List) {
+          return list.map(SavedPeer.fromJson).whereType<SavedPeer>().toList();
+        }
+      } catch (_) {}
+      return [];
+    }
+    // Migrate the old "host:port" list from earlier versions.
+    final legacy = _prefs.getStringList('${_p}manualPeers') ?? const [];
+    var i = 0;
+    return [
+      for (final e in legacy)
+        if (_parseLegacy(e) case (final host, final port))
+          SavedPeer(key: 'legacy${i++}', host: host, port: port),
+    ];
+  }
+
+  set savedPeers(List<SavedPeer> v) {
+    _prefs.setString(
+      '${_p}savedPeers',
+      jsonEncode([for (final s in v) s.toJson()]),
+    );
+    _prefs.remove('${_p}manualPeers');
+  }
+
+  static (String, int)? _parseLegacy(String s) {
+    final i = s.lastIndexOf(':');
+    if (i <= 0) return s.isEmpty ? null : (s, defaultTcpPort);
+    final port = int.tryParse(s.substring(i + 1));
+    return port == null ? (s, defaultTcpPort) : (s.substring(0, i), port);
+  }
 
   static String _defaultName() {
     try {

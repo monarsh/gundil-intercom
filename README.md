@@ -20,8 +20,13 @@ answering and no chat. It's audio only.
 - **Half-duplex like a real radio**: only one person is heard at a time.
   Incoming audio is muted while you're transmitting, so there's no feedback.
 - **Roger beep**: a short chirp when the other side lets go.
-- **Add a peer by IP** for networks that block broadcast. Peers you add this
-  way are remembered.
+- **Saved peers**: add a peer by IP (or keep a discovered one) and it stays in
+  the list across restarts, greyed out while offline. The app keeps retrying
+  in the background, so a saved peer comes online automatically. This also
+  works on networks that block broadcast.
+- **Edit peers**: every peer has a ⋮ menu (or long-press) to rename it, change
+  its IP/port, keep it in the list, or remove it. If a saved device gets a new
+  IP, the saved address updates itself once the device is seen again.
 
 ## How it works
 
@@ -119,8 +124,11 @@ these artifacts: a Linux tarball, the Windows installer
    button turns red and says **ON AIR** while you're transmitting.
 4. When someone talks to you, their voice plays on your speaker and their name
    is highlighted.
-5. If a peer doesn't appear, use **Add peer by IP** (🔗 icon) and enter the IP
-   address shown in that device's *Settings*.
+5. If a peer doesn't appear, press **+ Add** (or the 🔗 icon) and enter the IP
+   address shown in that device's *Settings*. A peer you add stays in the list
+   until you remove it, even after the app restarts.
+6. Use a peer's **⋮** menu to **Edit** it (name, IP, port), **Rename** a
+   discovered peer, **Keep in list**, or **Remove** it.
 
 Set `P2P_INTERCOM_PROFILE=<name>` to run several separate instances on the same
 computer, for example while testing.

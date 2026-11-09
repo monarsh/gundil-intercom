@@ -12,6 +12,8 @@ Future<void> main() async {
     selfId: settings.deviceId,
     name: settings.name,
     audio: NativeAudioEngine(),
+    savedPeers: settings.savedPeers,
+    onSavedPeersChanged: (list) => settings.savedPeers = list,
   );
   await service.start();
   runApp(IntercomApp(service: service, settings: settings));

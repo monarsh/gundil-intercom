@@ -24,7 +24,7 @@ class PttPanel extends StatelessWidget {
         final incoming = service.incoming;
         final talkerName = incoming == null
             ? null
-            : service.peer(incoming.peerId)?.name ?? 'Someone';
+            : service.displayName(incoming.peerId);
 
         final String status;
         if (service.transmitting) {

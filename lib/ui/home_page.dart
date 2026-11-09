@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import '../src/intercom_service.dart';
 import '../src/protocol.dart';
 import '../src/settings.dart';
+import 'peer_dialog.dart';
 import 'peer_list.dart';
 import 'ptt_panel.dart';
 
@@ -56,7 +57,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           ),
         );
     });
-    _restoreManualPeers();
   }
 
   @override
@@ -87,91 +87,38 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return KeyEventResult.handled; // also swallows KeyRepeatEvent
   }
 
-  Future<void> _restoreManualPeers() async {
-    for (final entry in widget.settings.manualPeers) {
-      final (host, port) = _parseEndpoint(entry);
-      if (host == null) continue;
-      try {
-        await service.addManualPeer(host, port: port);
-      } catch (_) {
-        // Peer offline right now; it will reappear via discovery.
-      }
-    }
-  }
-
-  static (String?, int) _parseEndpoint(String s) {
-    final t = s.trim();
-    if (t.isEmpty) return (null, defaultTcpPort);
-    final i = t.lastIndexOf(':');
-    if (i > 0 && !t.substring(0, i).contains(':')) {
-      final p = int.tryParse(t.substring(i + 1));
-      if (p != null && p > 0 && p < 65536) return (t.substring(0, i), p);
-    }
-    return (t, defaultTcpPort);
-  }
-
   // ---------------------------------------------------------------- dialogs
 
   Future<void> _addPeerDialog() async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Add peer by IP'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Use this when automatic discovery is blocked (some routers, '
-              'VPNs or different subnets).',
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: 'IP address or host[:port]',
-                hintText: '192.168.1.42',
-                helperText: 'Default port $defaultTcpPort',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (v) => Navigator.pop(ctx, v),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, controller.text),
-            child: const Text('Connect'),
-          ),
-        ],
-      ),
+    final r = await showPeerDialog(
+      context,
+      title: 'Add peer',
+      confirmText: 'Add',
     );
-    controller.dispose();
     _focus.requestFocus();
-    if (result == null) return;
-    final (host, port) = _parseEndpoint(result);
-    if (host == null) return;
+    if (r == null || !mounted) return;
     try {
-      final p = await service.addManualPeer(host, port: port);
-      final saved = widget.settings.manualPeers;
-      final entry = '$host:$port';
-      if (!saved.contains(entry)) {
-        widget.settings.manualPeers = [...saved, entry];
-      }
-      _messenger.currentState?.showSnackBar(
-        SnackBar(content: Text('Connected to ${p.name}')),
+      final online = await service.addSavedPeer(
+        host: r.host,
+        port: r.port,
+        label: r.label,
       );
-    } catch (e) {
+      final name = r.label.isEmpty ? '${r.host}:${r.port}' : r.label;
+      _messenger.currentState?.showSnackBar(
+        SnackBar(
+          content: Text(
+            online
+                ? 'Connected to $name'
+                : 'Saved $name. It is offline right now — '
+                      'it will connect when it comes online.',
+          ),
+        ),
+      );
+    } on ArgumentError catch (e) {
       if (!mounted) return;
       _messenger.currentState?.showSnackBar(
         SnackBar(
-          content: Text('Could not connect to $host:$port — $e'),
+          content: Text('${e.message}'),
           backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
