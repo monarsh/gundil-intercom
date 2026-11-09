@@ -40,9 +40,6 @@ class Settings {
       (_p.isEmpty ? _defaultName() : _p.substring(0, _p.length - 1));
   set name(String v) => _prefs.setString('${_p}name', v);
 
-  bool get autoAnswer => _prefs.getBool('${_p}autoAnswer') ?? false;
-  set autoAnswer(bool v) => _prefs.setBool('${_p}autoAnswer', v);
-
   /// Manually added peers as "host:port" strings.
   List<String> get manualPeers =>
       _prefs.getStringList('${_p}manualPeers') ?? [];

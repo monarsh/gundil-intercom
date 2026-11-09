@@ -26,14 +26,6 @@ class PlatformBridge {
   static Future<void> acquireMulticastLock() => _invoke('acquireMulticastLock');
   static Future<void> releaseMulticastLock() => _invoke('releaseMulticastLock');
 
-  /// Puts Android audio into voice-communication mode (enables the platform
-  /// echo canceller) and routes audio to the loudspeaker or earpiece.
-  static Future<void> startCallAudio({required bool speaker}) =>
-      _invoke('startCallAudio', {'speaker': speaker});
-  static Future<void> setSpeaker(bool speaker) =>
-      _invoke('setSpeaker', {'speaker': speaker});
-  static Future<void> stopCallAudio() => _invoke('stopCallAudio');
-
   static Future<void> _invoke(String method, [Object? args]) async {
     if (!_android) return;
     try {

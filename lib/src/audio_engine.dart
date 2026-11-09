@@ -3,12 +3,16 @@ import 'dart:typed_data';
 import 'package:intercom_audio/intercom_audio.dart';
 
 /// Abstraction over the microphone/speaker so the intercom logic can be tested
-/// without real audio hardware.
+/// without real audio hardware. Capture and playback are independent because
+/// a walkie-talkie only ever does one of them at a time.
 abstract class AudioEngine {
   int get sampleRate;
   void init(int sampleRate);
-  void start();
-  void stop();
+
+  void startCapture();
+  void stopCapture();
+  void startPlayback();
+  void stopPlayback();
 
   /// Returns all microphone samples captured since the last call.
   Int16List readCaptured();
@@ -38,21 +42,13 @@ class NativeAudioEngine implements AudioEngine {
   }
 
   @override
-  void start() {
-    _a.startPlayback();
-    try {
-      _a.startCapture();
-    } catch (_) {
-      _a.stopPlayback();
-      rethrow;
-    }
-  }
-
+  void startCapture() => _a.startCapture();
   @override
-  void stop() {
-    _a.stopCapture();
-    _a.stopPlayback();
-  }
+  void stopCapture() => _a.stopCapture();
+  @override
+  void startPlayback() => _a.startPlayback();
+  @override
+  void stopPlayback() => _a.stopPlayback();
 
   @override
   Int16List readCaptured() => _a.readCapture();
@@ -72,7 +68,8 @@ class NativeAudioEngine implements AudioEngine {
 /// [played].
 class FakeAudioEngine implements AudioEngine {
   int _rate = 16000;
-  bool running = false;
+  bool capturing = false;
+  bool playing = false;
   final List<Int16List> _toCapture = [];
   final List<int> played = [];
 
@@ -83,13 +80,17 @@ class FakeAudioEngine implements AudioEngine {
   @override
   void init(int sampleRate) => _rate = sampleRate;
   @override
-  void start() => running = true;
+  void startCapture() => capturing = true;
   @override
-  void stop() => running = false;
+  void stopCapture() => capturing = false;
+  @override
+  void startPlayback() => playing = true;
+  @override
+  void stopPlayback() => playing = false;
 
   @override
   Int16List readCaptured() {
-    if (_toCapture.isEmpty) return Int16List(0);
+    if (!capturing || _toCapture.isEmpty) return Int16List(0);
     final all = Int16List.fromList(_toCapture.expand((e) => e).toList());
     _toCapture.clear();
     return all;

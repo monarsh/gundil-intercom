@@ -26,9 +26,6 @@ class Peer {
   /// Whether a live TCP connection to the peer currently exists.
   bool connected = false;
 
-  final List<ChatMessage> messages = [];
-  int unread = 0;
-
   static const Duration beaconTimeout = Duration(seconds: 7);
 
   bool get online {
@@ -40,24 +37,43 @@ class Peer {
   String get endpoint => '${address.address}:$port';
 }
 
-class ChatMessage {
-  ChatMessage({required this.text, required this.mine, DateTime? time})
-    : time = time ?? DateTime.now();
-  final String text;
-  final bool mine;
-  final DateTime time;
+/// Who push-to-talk transmits to.
+sealed class TalkTarget {
+  const TalkTarget();
 }
 
-enum CallState { idle, outgoing, incoming, active }
+/// Every online peer at once (group call / paging).
+class EveryoneTarget extends TalkTarget {
+  const EveryoneTarget();
+  @override
+  bool operator ==(Object other) => other is EveryoneTarget;
+  @override
+  int get hashCode => 0;
+}
 
-class CallInfo {
-  CallInfo({
+/// A single peer.
+class PeerTarget extends TalkTarget {
+  const PeerTarget(this.peerId);
+  final String peerId;
+  @override
+  bool operator ==(Object other) =>
+      other is PeerTarget && other.peerId == peerId;
+  @override
+  int get hashCode => peerId.hashCode;
+}
+
+/// A transmission we are currently receiving.
+class IncomingTalk {
+  IncomingTalk({
     required this.peerId,
-    required this.state,
     required this.sampleRate,
+    required this.group,
   });
   final String peerId;
-  CallState state;
   final int sampleRate;
-  DateTime? startedAt;
+
+  /// Sent to everyone rather than just us.
+  final bool group;
+  final DateTime startedAt = DateTime.now();
+  DateTime lastAudio = DateTime.now();
 }

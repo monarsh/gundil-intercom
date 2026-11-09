@@ -1,33 +1,27 @@
 # P2P Intercom
 
-A serverless, peer-to-peer **voice intercom over TCP/IP** for **Linux, Windows
-and Android**, with a GUI that lists every intercom on the local network and
-lets you switch between them with one click.
+A serverless, peer-to-peer **push-to-talk intercom over TCP/IP** for **Linux,
+Windows and Android**. It works like a walkie-talkie: pick who to talk to, hold
+the button and talk. They hear you straight away. There's no dialling, no
+answering and no chat. It's audio only.
 
-![Two desktop instances in a call](docs/screenshot-desktop.png)
-
-<img src="docs/screenshot-phone.png" width="560" alt="Phone layout: incoming call and in-call peer page">
+![Desktop window transmitting to "Reception"; phone-sized window receiving](docs/screenshot.png)
 
 ## Features
 
-- **Zero configuration**: peers find each other automatically with UDP
-  broadcast beacons. No server, no accounts.
-- **Full-duplex voice calls** over a direct TCP connection: 16 kHz, 16-bit mono
-  PCM (~256 kbit/s), 20 ms frames, latency capped at 250 ms.
-- **Switch between peers**: the peer list shows who's online; clicking another
-  peer's call button (⇄) hangs up the current call and calls the new one.
-- **Ring / answer / decline / busy / missed call**. Unanswered calls time out
-  after 30 s.
-- **Auto-answer ("intercom mode")**: incoming calls connect straight away, like a
-  door intercom.
-- **Text chat** with each peer, with unread badges.
-- **Mute**, a live mic level meter and a call timer. On Android you can also
-  switch between loudspeaker and earpiece.
-- **Add a peer by IP** for networks that block broadcast (VPNs, some
-  routers or other subnets). Peers you add this way are remembered.
-- **Responsive UI**: on desktop and tablets the peer list and the chosen peer
-  are side by side; on phones you tap through from the list to a peer's page. The
-  call bar stays on top either way.
+- **Push-to-talk**: hold the big button (or the **Space bar** on desktop) to
+  transmit. Let go to stop. The other side plays your voice immediately.
+- **Switch channels with one tap**: talk to **Everyone** at once, or to a single
+  peer. Tapping another entry in the list changes who you're talking to.
+- **Zero configuration**: intercoms on the same LAN/Wi-Fi find each other
+  automatically with UDP broadcast. No server and no accounts.
+- **Clear "who's talking" indicator**: a speaker icon next to the peer, and a
+  banner showing "*Office-PC is talking*".
+- **Half-duplex like a real radio**: only one person is heard at a time.
+  Incoming audio is muted while you're transmitting, so there's no feedback.
+- **Roger beep**: a short chirp when the other side lets go.
+- **Add a peer by IP** for networks that block broadcast. Peers you add this
+  way are remembered.
 
 ## How it works
 
@@ -47,24 +41,25 @@ lets you switch between them with one click.
 | Layer | File | Notes |
 |---|---|---|
 | Discovery | `lib/src/discovery.dart` | JSON beacon every 2 s to `255.255.255.255` and each interface's /24 broadcast address. A peer counts as offline after 7 s without a beacon. |
-| Transport | `lib/src/peer_connection.dart` | One TCP socket per peer pair, `TCP_NODELAY`. |
-| Protocol | `lib/src/protocol.dart` | Each frame is `[type:1][length:4 BE][payload]`. Control frames carry JSON; audio frames carry raw PCM16LE. |
-| Call logic | `lib/src/intercom_service.dart` | Peers, the single active call, chat and the audio pump. |
-| Audio | `packages/intercom_audio` | Flutter FFI plugin built on [miniaudio](https://miniaud.io), with lock-free ring buffers between the native audio threads and Dart. |
-| Android glue | `android/.../MainActivity.kt` | Mic permission, Wi-Fi multicast lock, `MODE_IN_COMMUNICATION` (hardware echo cancellation) and speaker routing. |
+| Transport | `lib/src/peer_connection.dart` | One persistent TCP socket per peer pair, `TCP_NODELAY`. |
+| Protocol | `lib/src/protocol.dart` | Each frame is `[type:1][length:4 BE][payload]`. |
+| Push-to-talk logic | `lib/src/intercom_service.dart` | Peers, channel selection, transmit and receive. |
+| Audio | `packages/intercom_audio` | Flutter FFI plugin built on [miniaudio](https://miniaud.io), with lock-free ring buffers between the native audio threads and Dart. The mic is open only while you hold the button. |
+| Android glue | `android/.../MainActivity.kt` | Mic permission and the Wi-Fi multicast lock (needed to receive discovery broadcasts). |
 
-### Wire protocol
+### Wire protocol (v2)
 
 | Code | Type | Payload |
 |---|---|---|
 | `0x01` | HELLO | `{"id","name","platform","port","v"}` (sent by both sides when the connection opens) |
-| `0x02` | CALL_REQUEST | `{"sampleRate":16000}` |
-| `0x03` | CALL_ACCEPT | – |
-| `0x04` | CALL_REJECT | `{"reason":"busy"\|"declined"}` |
-| `0x05` | HANGUP | – |
-| `0x06` | AUDIO | PCM16 little-endian, mono |
-| `0x07` | TEXT | `{"text": "..."}` |
+| `0x02` | TALK_START | `{"sampleRate":16000,"group":bool}` (button pressed) |
+| `0x03` | TALK_END | – (button released) |
+| `0x04` | AUDIO | PCM16 little-endian, mono, 16 kHz, about every 20 ms |
 | `0x08/0x09` | PING / PONG | – |
+
+The receiver plays the first talker it hears. Anyone else who presses their
+button at the same time is ignored until that talker lets go. A talker that
+goes silent for 2 s (crash or lost network) is dropped automatically.
 
 ## Building
 
@@ -103,14 +98,13 @@ Linux, Windows and Android builds as artifacts.
 
 ## Usage
 
-1. Start the app on two or more devices on the **same LAN or Wi-Fi**.
-2. They show up in each other's peer list within about 2 seconds. A green dot
-   means online.
-3. Click a peer to open it, then press **Call**. The other side rings and can
-   **Answer** or **Decline**. Turn on *Settings → Auto-answer* to get
-   door-intercom behaviour.
-4. To talk to someone else, press the ⇄ button next to them (or **Switch call
-   here** on their page). The current call ends and the new one starts.
+1. Start the app on two or more devices on the **same LAN or Wi-Fi**. They
+   appear in each other's list within about 2 seconds.
+2. Choose **Everyone** or one peer in the list.
+3. **Hold PUSH TO TALK** (or Space) and speak. Release when you're done. The
+   button turns red and says **ON AIR** while you're transmitting.
+4. When someone talks to you, their voice plays on your speaker and their name
+   is highlighted.
 5. If a peer doesn't appear, use **Add peer by IP** (🔗 icon) and enter the IP
    address shown in that device's *Settings*.
 
@@ -119,29 +113,21 @@ computer, for example while testing.
 
 ### Firewall and network notes
 
-- Allow **TCP 47801** (calls and chat) and **UDP 47800** (discovery). Windows
-  asks the first time you run the app. Allow *Private networks*.
-- Guest Wi-Fi with "client isolation" blocks traffic between devices. Use a
-  normal network.
+- Allow **TCP 47801** (audio) and **UDP 47800** (discovery). Windows asks the
+  first time you run the app. Allow *Private networks*.
+- Guest Wi-Fi with "client isolation" blocks traffic between devices.
 - If port 47801 is already taken, the app uses a random port and advertises it
-  in its beacons. Discovery still works, but adding that instance by IP needs
-  `host:port`.
-
-### Audio notes
-
-- Android uses the platform's voice-communication path, which includes
-  hardware echo cancellation.
-- Desktop builds have **no echo cancellation**. Use headphones, or mute when
-  you're not talking, to avoid feedback.
-- Audio is not encrypted or compressed. It is meant for trusted local networks.
+  in its beacons.
+- Audio is uncompressed (about 256 kbit/s while talking) and **not encrypted**.
+  It is meant for trusted local networks.
 
 ## Project layout
 
 ```
 lib/
   main.dart                 app entry, theme
-  src/                      networking, protocol, call logic (no UI)
-  ui/                       home page, peer list, peer panel, call bar
+  src/                      networking, protocol, push-to-talk logic (no UI)
+  ui/                       home page, channel list, push-to-talk panel
 packages/intercom_audio/    FFI audio plugin (C + miniaudio)
 android/ linux/ windows/    platform runners
 test/                       protocol + multi-node integration tests

@@ -12,7 +12,6 @@ Future<void> main() async {
     selfId: settings.deviceId,
     name: settings.name,
     audio: NativeAudioEngine(),
-    autoAnswer: settings.autoAnswer,
   );
   await service.start();
   runApp(IntercomApp(service: service, settings: settings));

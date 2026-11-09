@@ -34,11 +34,11 @@ void main() {
     test('decodes many frames from one chunk', () {
       final bytes = <int>[];
       for (var i = 0; i < 50; i++) {
-        bytes.addAll(Frame.json(MessageType.text, {'text': 'm$i'}).encode());
+        bytes.addAll(Frame.json(MessageType.talkStart, {'n': 'm$i'}).encode());
       }
       final out = FrameDecoder().add(bytes);
       expect(out.length, 50);
-      expect(out.last.json['text'], 'm49');
+      expect(out.last.json['n'], 'm49');
     });
 
     test('skips unknown frame types', () {

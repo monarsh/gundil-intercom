@@ -9,6 +9,9 @@ class PeerConnection {
     try {
       socket.setOption(SocketOption.tcpNoDelay, true);
     } catch (_) {}
+    // Write errors (peer vanished) are reported on `done`; without a handler
+    // they would surface as uncaught async errors.
+    socket.done.then((_) => _close(null), onError: (Object e) => _close(e));
     _sub = socket.listen(
       _onData,
       onError: (Object e) => _close(e),

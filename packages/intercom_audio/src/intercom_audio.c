@@ -123,8 +123,9 @@ int32_t ia_start_capture(void) {
   cfg.periodSizeInMilliseconds = 20;
   cfg.dataCallback = capture_cb;
 #if defined(__ANDROID__)
-  cfg.aaudio.inputPreset = ma_aaudio_input_preset_voice_communication;
-  cfg.opensl.recordingPreset = ma_opensl_recording_preset_voice_communication;
+  // Half-duplex push-to-talk: no echo canceller needed, just a clean mic.
+  cfg.aaudio.inputPreset = ma_aaudio_input_preset_voice_recognition;
+  cfg.opensl.recordingPreset = ma_opensl_recording_preset_voice_recognition;
 #endif
   ma_result r = ma_device_init(&g_context, &cfg, &g_capture);
   if (r != MA_SUCCESS) {
@@ -162,9 +163,11 @@ int32_t ia_start_playback(void) {
   cfg.periodSizeInMilliseconds = 20;
   cfg.dataCallback = playback_cb;
 #if defined(__ANDROID__)
-  cfg.aaudio.usage = ma_aaudio_usage_voice_communication;
+  // Walkie-talkie: play loud through the loudspeaker (media path), not the
+  // earpiece that the voice-call path would pick.
+  cfg.aaudio.usage = ma_aaudio_usage_media;
   cfg.aaudio.contentType = ma_aaudio_content_type_speech;
-  cfg.opensl.streamType = ma_opensl_stream_type_voice;
+  cfg.opensl.streamType = ma_opensl_stream_type_media;
 #endif
   ma_result r = ma_device_init(&g_context, &cfg, &g_playback);
   if (r != MA_SUCCESS) {

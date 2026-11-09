@@ -20,12 +20,6 @@ String platformLabel(String platform) => switch (platform) {
   _ => platform,
 };
 
-String formatDuration(Duration d) {
-  final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-  final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-  return d.inHours > 0 ? '${d.inHours}:$m:$s' : '$m:$s';
-}
-
 /// Round avatar with the peer's initial and a presence dot.
 class PeerAvatar extends StatelessWidget {
   const PeerAvatar({super.key, required this.peer, this.radius = 22});
@@ -65,31 +59,6 @@ class PeerAvatar extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Horizontal microphone level meter.
-class LevelMeter extends StatelessWidget {
-  const LevelMeter({super.key, required this.level, this.width = 80});
-
-  final double level;
-  final double width;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      width: width,
-      height: 6,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(3),
-        child: LinearProgressIndicator(
-          value: level,
-          backgroundColor: scheme.onPrimaryContainer.withValues(alpha: 0.15),
-          color: level > 0.85 ? Colors.orange : scheme.primary,
-        ),
-      ),
     );
   }
 }

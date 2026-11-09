@@ -10,15 +10,15 @@
 /// ```
 ///
 /// Control messages carry UTF-8 JSON payloads; [MessageType.audio] carries raw
-/// signed 16-bit little-endian mono PCM at the sample rate negotiated in the
-/// call request.
+/// signed 16-bit little-endian mono PCM at the sample rate announced in the
+/// preceding [MessageType.talkStart].
 library;
 
 import 'dart:convert';
 import 'dart:typed_data';
 
 /// Protocol version, sent in [MessageType.hello] and discovery beacons.
-const int protocolVersion = 1;
+const int protocolVersion = 2;
 
 /// Default TCP port each peer listens on.
 const int defaultTcpPort = 47801;
@@ -35,13 +35,17 @@ const int maxFramePayload = 256 * 1024;
 const int frameHeaderLength = 5;
 
 enum MessageType {
+  /// `{"id","name","platform","port","v"}` - sent by both ends on connect.
   hello(0x01),
-  callRequest(0x02),
-  callAccept(0x03),
-  callReject(0x04),
-  hangup(0x05),
-  audio(0x06),
-  text(0x07),
+
+  /// Push-to-talk pressed: `{"sampleRate": 16000, "group": bool}`.
+  talkStart(0x02),
+
+  /// Push-to-talk released.
+  talkEnd(0x03),
+
+  /// Raw PCM16LE mono samples of an ongoing transmission.
+  audio(0x04),
   ping(0x08),
   pong(0x09);
 

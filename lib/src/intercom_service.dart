@@ -12,15 +12,20 @@ import 'peer_connection.dart';
 import 'platform_bridge.dart';
 import 'protocol.dart';
 
-/// Notification for the UI (errors, call ended reasons, ...).
+/// Notification for the UI (errors and short info messages).
 class IntercomEvent {
   IntercomEvent(this.message, {this.error = false});
   final String message;
   final bool error;
 }
 
-/// The heart of the intercom: owns the TCP server, the connections to every
-/// peer, LAN discovery, the single active call and the audio pump.
+/// Walkie-talkie style intercom.
+///
+/// There is no call setup: while push-to-talk is held, microphone audio is
+/// streamed over TCP to the selected peer (or to everyone) and played on
+/// their speaker straight away. Releasing the button ends the transmission.
+/// The channel is half-duplex: incoming audio is ignored while we transmit,
+/// and only one incoming talker is played at a time.
 class IntercomService extends ChangeNotifier {
   IntercomService({
     required this.selfId,
@@ -30,9 +35,8 @@ class IntercomService extends ChangeNotifier {
     this.enableDiscovery = true,
     this.discoveryUdpPort = discoveryPort,
     this.sampleRate = defaultSampleRate,
-    bool autoAnswer = false,
-  }) : _name = name, // ignore: prefer_initializing_formals
-       _autoAnswer = autoAnswer; // ignore: prefer_initializing_formals
+    this.rogerBeep = true,
+  }) : _name = name; // ignore: prefer_initializing_formals
 
   final String selfId;
   final AudioEngine audio;
@@ -41,37 +45,49 @@ class IntercomService extends ChangeNotifier {
   final int discoveryUdpPort;
   final int sampleRate;
 
-  /// Audio frame duration sent over the wire.
+  /// Play a short "over" chirp when a remote transmission ends.
+  final bool rogerBeep;
+
+  /// How often captured audio is sent.
   static const Duration frameDuration = Duration(milliseconds: 20);
 
   /// Playback queue above which we drop audio to keep latency low.
   static const Duration maxPlaybackLatency = Duration(milliseconds: 250);
 
-  /// Unanswered outgoing calls are cancelled after this long.
-  static const Duration ringTimeout = Duration(seconds: 30);
+  /// An incoming transmission with no audio for this long is considered over
+  /// (the sender crashed or the network dropped).
+  static const Duration talkTimeout = Duration(seconds: 2);
+
+  /// The speaker is closed after being idle for this long.
+  static const Duration speakerIdleClose = Duration(seconds: 3);
 
   String _name;
-  bool _autoAnswer;
-  bool _muted = false;
-  bool _speaker = true;
   double _micLevel = 0;
+  bool _audioReady = false;
+  bool _shutDown = false;
 
   ServerSocket? _server;
   Discovery? _discovery;
   Timer? _housekeeping;
-  Timer? _audioPump;
-  Timer? _ringTimer;
 
   final Map<String, Peer> _peers = {};
   final Map<String, PeerConnection> _links = {};
   final Set<PeerConnection> _allConnections = {};
   final Map<String, Future<PeerConnection>> _connecting = {};
 
-  CallInfo? _call;
-  PeerConnection? _callLink;
+  TalkTarget _target = const EveryoneTarget();
 
-  String? _selectedPeerId;
-  bool _shutDown = false;
+  // Transmit state.
+  bool _pttHeld = false;
+  bool _transmitting = false;
+  List<PeerConnection> _txLinks = [];
+  Timer? _txPump;
+  int _levelTick = 0;
+
+  // Receive state.
+  IncomingTalk? _incoming;
+  bool _speakerOpen = false;
+  Timer? _speakerCloser;
 
   final StreamController<IntercomEvent> _events =
       StreamController<IntercomEvent>.broadcast();
@@ -79,17 +95,21 @@ class IntercomService extends ChangeNotifier {
   // ---------------------------------------------------------------- getters
 
   String get name => _name;
-  bool get autoAnswer => _autoAnswer;
-  bool get muted => _muted;
-  bool get speaker => _speaker;
   double get micLevel => _micLevel;
   int? get listenPort => _server?.port;
   bool get discoveryRunning => _discovery?.running ?? false;
-  CallInfo? get call => _call;
   Stream<IntercomEvent> get events => _events.stream;
-  String? get selectedPeerId => _selectedPeerId;
-  Peer? get selectedPeer =>
-      _selectedPeerId == null ? null : _peers[_selectedPeerId];
+  TalkTarget get target => _target;
+
+  /// Push-to-talk is held (we may still be connecting).
+  bool get pttHeld => _pttHeld;
+
+  /// Microphone audio is actually being sent.
+  bool get transmitting => _transmitting;
+
+  /// The transmission we're currently hearing, if any.
+  IncomingTalk? get incoming => _incoming;
+
   Peer? peer(String id) => _peers[id];
 
   /// Peers sorted: online first, then by name.
@@ -101,6 +121,14 @@ class IntercomService extends ChangeNotifier {
     });
     return list;
   }
+
+  List<Peer> get onlinePeers => _peers.values.where((p) => p.online).toList();
+
+  /// Human readable name of [target].
+  String targetName(TalkTarget t) => switch (t) {
+    EveryoneTarget() => 'Everyone',
+    PeerTarget(:final peerId) => _peers[peerId]?.name ?? 'Unknown',
+  };
 
   // -------------------------------------------------------------- lifecycle
 
@@ -138,21 +166,25 @@ class IntercomService extends ChangeNotifier {
       }
     }
 
-    _housekeeping = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => notifyListeners(),
-    );
+    _housekeeping = Timer.periodic(const Duration(seconds: 1), (_) {
+      final inc = _incoming;
+      if (inc != null &&
+          DateTime.now().difference(inc.lastAudio) > talkTimeout) {
+        _endIncoming(beep: false);
+      }
+      notifyListeners();
+    });
     notifyListeners();
   }
 
-  /// Hangs up, closes every socket and releases resources.
+  /// Stops transmitting, closes every socket and releases resources.
   Future<void> shutdown() async {
     if (_shutDown) return;
     _shutDown = true;
-    if (_call != null) hangup();
+    stopTalking();
     _housekeeping?.cancel();
-    _ringTimer?.cancel();
-    _stopAudio();
+    _speakerCloser?.cancel();
+    _closeSpeaker();
     await _discovery?.dispose();
     await PlatformBridge.releaseMulticastLock();
     for (final c in _allConnections.toList()) {
@@ -177,27 +209,12 @@ class IntercomService extends ChangeNotifier {
     notifyListeners();
   }
 
-  set autoAnswer(bool v) {
-    _autoAnswer = v;
-    notifyListeners();
-  }
-
-  void toggleMute() {
-    _muted = !_muted;
-    if (_muted) _micLevel = 0;
-    notifyListeners();
-  }
-
-  void toggleSpeaker() {
-    _speaker = !_speaker;
-    PlatformBridge.setSpeaker(_speaker);
-    notifyListeners();
-  }
-
-  void selectPeer(String? id) {
-    _selectedPeerId = id;
-    final p = id == null ? null : _peers[id];
-    if (p != null) p.unread = 0;
+  /// Chooses who push-to-talk transmits to. Switching while transmitting
+  /// ends the current transmission.
+  void selectTarget(TalkTarget t) {
+    if (t == _target) return;
+    if (_pttHeld) stopTalking();
+    _target = t;
     notifyListeners();
   }
 
@@ -228,14 +245,6 @@ class IntercomService extends ChangeNotifier {
     p.port = port;
     notifyListeners();
     return p;
-  }
-
-  void removePeer(String id) {
-    if (_call?.peerId == id) hangup();
-    _links.remove(id)?.close();
-    _peers.remove(id);
-    if (_selectedPeerId == id) _selectedPeerId = null;
-    notifyListeners();
   }
 
   void _onBeacon(DiscoveryBeacon b) {
@@ -335,10 +344,9 @@ class IntercomService extends ChangeNotifier {
           .firstOrNull;
       if (alt != null) _links[id] = alt;
       _peers[id]?.connected = alt != null;
+      if (alt == null && _incoming?.peerId == id) _endIncoming(beep: false);
     }
-    if (identical(c, _callLink)) {
-      _endCall('Connection to ${_peerName(id)} lost', error: true);
-    }
+    _txLinks.remove(c);
     notifyListeners();
   }
 
@@ -380,7 +388,6 @@ class IntercomService extends ChangeNotifier {
 
     final id = c.remoteId;
     if (id == null) return; // Must say hello first.
-    final call = _call;
 
     switch (f.type) {
       case MessageType.hello:
@@ -389,222 +396,210 @@ class IntercomService extends ChangeNotifier {
         c.send(Frame.empty(MessageType.pong));
       case MessageType.pong:
         break;
-      case MessageType.text:
-        final text = f.json['text'];
-        final p = _peers[id];
-        if (text is String && p != null) {
-          p.messages.add(ChatMessage(text: text, mine: false));
-          if (_selectedPeerId != id) p.unread++;
-          notifyListeners();
-        }
-      case MessageType.callRequest:
-        final rate = (f.json['sampleRate'] as int?) ?? defaultSampleRate;
-        if (call != null) {
-          c.send(Frame.json(MessageType.callReject, {'reason': 'busy'}));
-          return;
-        }
-        _call = CallInfo(
-          peerId: id,
-          state: CallState.incoming,
-          sampleRate: rate,
-        );
-        _callLink = c;
-        _ringTimer?.cancel();
-        _ringTimer = Timer(ringTimeout, () {
-          if (_call?.state == CallState.incoming) {
-            reject();
-            _emit('Missed call from ${_peerName(id)}');
-          }
-        });
-        notifyListeners();
-        if (_autoAnswer) accept();
-      case MessageType.callAccept:
-        if (call != null &&
-            call.peerId == id &&
-            call.state == CallState.outgoing) {
-          _callLink = c;
-          _goActive();
-        }
-      case MessageType.callReject:
-        if (call != null &&
-            call.peerId == id &&
-            call.state != CallState.active) {
-          final reason = f.json['reason'];
-          _endCall(
-            reason == 'busy'
-                ? '${_peerName(id)} is busy'
-                : '${_peerName(id)} declined the call',
-          );
-        }
-      case MessageType.hangup:
-        if (call != null && call.peerId == id) {
-          final missed = call.state == CallState.incoming;
-          _endCall(
-            missed
-                ? 'Missed call from ${_peerName(id)}'
-                : '${_peerName(id)} ended the call',
-          );
-        }
+      case MessageType.talkStart:
+        _onTalkStart(id, f.json);
+      case MessageType.talkEnd:
+        if (_incoming?.peerId == id) _endIncoming(beep: rogerBeep);
       case MessageType.audio:
-        if (call != null &&
-            call.peerId == id &&
-            call.state == CallState.active) {
-          _playIncoming(bytesToPcm(f.payload));
-        }
+        _onAudio(id, f.payload);
     }
   }
 
-  // ------------------------------------------------------------------ chat
+  // --------------------------------------------------------------- receive
 
-  Future<void> sendText(String peerId, String text) async {
-    final t = text.trim();
-    if (t.isEmpty) return;
-    final p = _peers[peerId];
-    if (p == null) return;
-    final conn = await _linkTo(p);
-    conn.send(Frame.json(MessageType.text, {'text': t}));
-    p.messages.add(ChatMessage(text: t, mine: true));
-    notifyListeners();
-  }
-
-  // ----------------------------------------------------------------- calls
-
-  /// Calls [peerId]. Any existing call is ended first, which is how the user
-  /// switches between peers.
-  Future<void> callPeer(String peerId) async {
-    final p = _peers[peerId];
-    if (p == null) return;
-    if (_call != null) hangup();
-    if (!await PlatformBridge.requestMicrophone()) {
-      _emit('Microphone permission denied', error: true);
+  void _onTalkStart(String id, Map<String, Object?> m) {
+    final current = _incoming;
+    // Someone else already has the channel: ignore the newcomer.
+    if (current != null && current.peerId != id) return;
+    final rate = (m['sampleRate'] as int?) ?? defaultSampleRate;
+    if (rate != sampleRate) {
+      debugPrint('Ignoring talk at unsupported sample rate $rate');
       return;
     }
-    _call = CallInfo(
-      peerId: peerId,
-      state: CallState.outgoing,
-      sampleRate: sampleRate,
+    _incoming = IncomingTalk(
+      peerId: id,
+      sampleRate: rate,
+      group: m['group'] == true,
     );
+    _openSpeaker();
     notifyListeners();
+  }
+
+  void _onAudio(String id, Uint8List payload) {
+    final inc = _incoming;
+    if (inc == null || inc.peerId != id) return;
+    inc.lastAudio = DateTime.now();
+    if (_transmitting || !_speakerOpen) return; // Half-duplex.
+    final cap = audio.sampleRate * maxPlaybackLatency.inMilliseconds ~/ 1000;
+    if (audio.queued > cap) audio.flushPlayback();
+    audio.play(bytesToPcm(payload));
+  }
+
+  void _endIncoming({required bool beep}) {
+    if (_incoming == null) return;
+    _incoming = null;
+    if (beep && _speakerOpen && !_transmitting) {
+      audio.play(rogerTone(audio.sampleRate));
+    }
+    _scheduleSpeakerClose();
+    notifyListeners();
+  }
+
+  void _openSpeaker() {
+    _speakerCloser?.cancel();
+    if (_speakerOpen) return;
+    if (!_ensureAudio()) return;
     try {
-      final conn = await _linkTo(p);
-      if (_call?.peerId != peerId) return; // Cancelled while connecting.
-      _callLink = conn;
-      conn.send(
-        Frame.json(MessageType.callRequest, {'sampleRate': sampleRate}),
-      );
-      _ringTimer?.cancel();
-      _ringTimer = Timer(ringTimeout, () {
-        if (_call?.state == CallState.outgoing && _call?.peerId == peerId) {
-          hangup();
-          _emit('${p.name} did not answer');
-        }
-      });
+      audio.startPlayback();
+      _speakerOpen = true;
     } catch (e) {
-      if (_call?.peerId == peerId) {
-        _endCall('Could not reach ${p.name}: ${_short(e)}', error: true);
-      }
+      _emit('Speaker unavailable: ${_short(e)}', error: true);
     }
   }
 
-  Future<void> accept() async {
-    final call = _call;
-    final link = _callLink;
-    if (call == null || call.state != CallState.incoming || link == null) {
-      return;
-    }
-    if (!await PlatformBridge.requestMicrophone()) {
-      _emit('Microphone permission denied', error: true);
-      reject();
-      return;
-    }
-    if (!identical(_call, call)) return;
-    link.send(Frame.empty(MessageType.callAccept));
-    _goActive();
+  void _scheduleSpeakerClose() {
+    _speakerCloser?.cancel();
+    _speakerCloser = Timer(speakerIdleClose, () {
+      if (_incoming == null) _closeSpeaker();
+    });
   }
 
-  void reject() {
-    final call = _call;
-    if (call == null || call.state != CallState.incoming) return;
-    _callLink?.send(Frame.json(MessageType.callReject, {'reason': 'declined'}));
-    _endCall(null);
-  }
-
-  void hangup() {
-    if (_call == null) return;
-    if (_call!.state == CallState.incoming) {
-      reject();
-      return;
-    }
-    _callLink?.send(Frame.empty(MessageType.hangup));
-    _endCall(null);
-  }
-
-  void _goActive() {
-    final call = _call!;
-    _ringTimer?.cancel();
-    call
-      ..state = CallState.active
-      ..startedAt = DateTime.now();
+  void _closeSpeaker() {
+    if (!_speakerOpen) return;
+    _speakerOpen = false;
     try {
-      _startAudio(call.sampleRate);
-    } catch (e) {
-      _callLink?.send(Frame.empty(MessageType.hangup));
-      _endCall('Audio device error: ${_short(e)}', error: true);
-      return;
-    }
-    notifyListeners();
-  }
-
-  void _endCall(String? reason, {bool error = false}) {
-    _ringTimer?.cancel();
-    _stopAudio();
-    _call = null;
-    _callLink = null;
-    if (reason != null) _emit(reason, error: error);
-    notifyListeners();
-  }
-
-  // ----------------------------------------------------------------- audio
-
-  void _startAudio(int rate) {
-    PlatformBridge.startCallAudio(speaker: _speaker);
-    audio.init(rate);
-    audio.start();
-    _audioPump?.cancel();
-    _audioPump = Timer.periodic(frameDuration, (_) => _pumpMic());
-  }
-
-  void _stopAudio() {
-    if (_audioPump == null) return;
-    _audioPump?.cancel();
-    _audioPump = null;
-    _micLevel = 0;
-    try {
-      audio.stop();
+      audio.stopPlayback();
     } catch (_) {}
-    PlatformBridge.stopCallAudio();
   }
 
-  int _levelTick = 0;
+  // -------------------------------------------------------------- transmit
+
+  /// Push-to-talk pressed: start streaming the microphone to [target].
+  Future<void> startTalking() async {
+    if (_pttHeld) return;
+    _pttHeld = true;
+    notifyListeners();
+
+    if (!await PlatformBridge.requestMicrophone()) {
+      _pttHeld = false;
+      _emit('Microphone permission denied', error: true);
+      notifyListeners();
+      return;
+    }
+    if (!_pttHeld) return; // Released while asking.
+
+    final target = _target;
+    final recipients = switch (target) {
+      EveryoneTarget() => onlinePeers,
+      PeerTarget(:final peerId) => [?_peers[peerId]],
+    };
+    if (recipients.isEmpty || recipients.every((p) => !p.online)) {
+      _pttHeld = false;
+      _emit(
+        target is EveryoneTarget
+            ? 'Nobody is online'
+            : '${targetName(target)} is offline',
+        error: true,
+      );
+      notifyListeners();
+      return;
+    }
+
+    final links = <PeerConnection>[];
+    await Future.wait(
+      recipients.map((p) async {
+        try {
+          links.add(await _linkTo(p));
+        } catch (e) {
+          _emit('Could not reach ${p.name}: ${_short(e)}', error: true);
+        }
+      }),
+    );
+    if (!_pttHeld || target != _target) return;
+    if (links.isEmpty) {
+      _pttHeld = false;
+      notifyListeners();
+      return;
+    }
+
+    if (!_ensureAudio()) {
+      _pttHeld = false;
+      notifyListeners();
+      return;
+    }
+    try {
+      audio.startCapture();
+    } catch (e) {
+      _pttHeld = false;
+      _emit('Microphone unavailable: ${_short(e)}', error: true);
+      notifyListeners();
+      return;
+    }
+
+    // Our own speaker would only feed back into the microphone.
+    if (_speakerOpen) audio.flushPlayback();
+
+    final start = Frame.json(MessageType.talkStart, {
+      'sampleRate': sampleRate,
+      'group': target is EveryoneTarget,
+    });
+    for (final l in links) {
+      l.send(start);
+    }
+    _txLinks = links;
+    _transmitting = true;
+    _txPump?.cancel();
+    _txPump = Timer.periodic(frameDuration, (_) => _pumpMic());
+    notifyListeners();
+  }
+
+  /// Push-to-talk released.
+  void stopTalking() {
+    if (!_pttHeld && !_transmitting) return;
+    _pttHeld = false;
+    if (_transmitting) {
+      _pumpMic(); // Send the tail end of what was said.
+      _txPump?.cancel();
+      _txPump = null;
+      final end = Frame.empty(MessageType.talkEnd);
+      for (final l in _txLinks) {
+        l.send(end);
+      }
+      _txLinks = [];
+      _transmitting = false;
+      try {
+        audio.stopCapture();
+      } catch (_) {}
+    }
+    _micLevel = 0;
+    notifyListeners();
+  }
 
   void _pumpMic() {
-    final link = _callLink;
-    if (link == null || _call?.state != CallState.active) return;
+    if (!_transmitting) return;
     final samples = audio.readCaptured();
     if (samples.isEmpty) return;
-    if (!_muted) {
-      link.send(Frame(MessageType.audio, pcmToBytes(samples)));
-      _micLevel = rmsLevel(samples);
+    final frame = Frame(MessageType.audio, pcmToBytes(samples));
+    for (final l in _txLinks) {
+      l.send(frame);
     }
+    _micLevel = rmsLevel(samples);
     // Refresh the level meter ~10x per second.
     if (++_levelTick % 5 == 0) notifyListeners();
   }
 
-  void _playIncoming(Int16List samples) {
-    final cap = audio.sampleRate * maxPlaybackLatency.inMilliseconds ~/ 1000;
-    if (audio.queued > cap) audio.flushPlayback();
-    audio.play(samples);
+  bool _ensureAudio() {
+    if (_audioReady) return true;
+    try {
+      audio.init(sampleRate);
+      _audioReady = true;
+    } catch (e) {
+      _emit('Audio unavailable: ${_short(e)}', error: true);
+    }
+    return _audioReady;
   }
+
+  // ---------------------------------------------------------------- helpers
 
   /// RMS level of [samples] normalised to 0..1 on a perceptual (dB) scale.
   static double rmsLevel(Int16List samples) {
@@ -619,10 +614,20 @@ class IntercomService extends ChangeNotifier {
     return ((db + 60) / 60).clamp(0.0, 1.0);
   }
 
-  // --------------------------------------------------------------- helpers
-
-  String _peerName(String? id) =>
-      (id == null ? null : _peers[id]?.name) ?? 'Peer';
+  /// Short two-tone "over" chirp played when a transmission ends.
+  static Int16List rogerTone(int rate) {
+    final out = <int>[];
+    for (final (freq, ms) in [(1400.0, 60), (1000.0, 80)]) {
+      final n = rate * ms ~/ 1000;
+      for (var i = 0; i < n; i++) {
+        final fade = math.min(1.0, math.min(i, n - i) / (rate * 0.005));
+        out.add(
+          (5000 * fade * math.sin(2 * math.pi * freq * i / rate)).round(),
+        );
+      }
+    }
+    return Int16List.fromList(out);
+  }
 
   void _emit(String message, {bool error = false}) {
     if (!_events.isClosed) _events.add(IntercomEvent(message, error: error));

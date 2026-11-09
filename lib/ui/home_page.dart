@@ -2,22 +2,22 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../src/intercom_service.dart';
-import '../src/models.dart';
 import '../src/protocol.dart';
 import '../src/settings.dart';
-import 'call_bar.dart';
 import 'peer_list.dart';
-import 'peer_panel.dart';
+import 'ptt_panel.dart';
 
 /// Main window.
 ///
-/// * Wide screens (desktop, tablets): peer list on the left, selected peer on
-///   the right — switching peers is a single click.
-/// * Narrow screens (phones): peer list; tapping a peer opens its page.
+/// * Wide screens (desktop, tablets): channel list on the left, big
+///   push-to-talk button on the right.
+/// * Narrow screens (phones): channel list on top, push-to-talk at the bottom.
 ///
-/// A [CallBar] with the call controls stays on top in both layouts.
+/// Pick a channel (Everyone or one peer), then hold the button — or the Space
+/// bar on desktop — to talk.
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.service, required this.settings});
 
@@ -34,7 +34,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final StreamSubscription<IntercomEvent> _eventSub;
   final GlobalKey<ScaffoldMessengerState> _messenger =
       GlobalKey<ScaffoldMessengerState>();
-  final GlobalKey<NavigatorState> _phoneNav = GlobalKey<NavigatorState>();
+  final FocusNode _focus = FocusNode(debugLabel: 'ptt-keyboard');
 
   IntercomService get service => widget.service;
 
@@ -44,12 +44,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _eventSub = service.events.listen((e) {
       if (!mounted) return;
-      _messenger.currentState?.showSnackBar(
-        SnackBar(
-          content: Text(e.message),
-          backgroundColor: e.error ? Theme.of(context).colorScheme.error : null,
-        ),
-      );
+      _messenger.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(e.message),
+            duration: const Duration(seconds: 2),
+            backgroundColor: e.error
+                ? Theme.of(context).colorScheme.error
+                : null,
+          ),
+        );
     });
     _restoreManualPeers();
   }
@@ -58,12 +63,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _eventSub.cancel();
+    _focus.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Never leave the microphone open in the background.
+    if (state != AppLifecycleState.resumed) service.stopTalking();
     if (state == AppLifecycleState.detached) service.shutdown();
+  }
+
+  /// Space bar = push-to-talk on desktop.
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event.logicalKey != LogicalKeyboardKey.space) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent) {
+      service.startTalking();
+    } else if (event is KeyUpEvent) {
+      service.stopTalking();
+    }
+    return KeyEventResult.handled; // also swallows KeyRepeatEvent
   }
 
   Future<void> _restoreManualPeers() async {
@@ -73,7 +94,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       try {
         await service.addManualPeer(host, port: port);
       } catch (_) {
-        // Peer offline right now; it will reappear via discovery or a retry.
+        // Peer offline right now; it will reappear via discovery.
       }
     }
   }
@@ -89,28 +110,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return (t, defaultTcpPort);
   }
 
-  // ---------------------------------------------------------------- actions
-
-  void _openPeer(Peer p, {required bool wide}) {
-    service.selectPeer(p.id);
-    if (wide) return;
-    final nav = _phoneNav.currentState!;
-    nav.popUntil((r) => r.isFirst);
-    nav
-        .push(
-          MaterialPageRoute<void>(
-            builder: (_) => _PhonePeerPage(service: service, peer: p),
-          ),
-        )
-        .then((_) {
-          if (service.selectedPeerId == p.id) service.selectPeer(null);
-        });
-  }
-
-  void _openPeerById(String id, {required bool wide}) {
-    final p = service.peer(id);
-    if (p != null) _openPeer(p, wide: wide);
-  }
+  // ---------------------------------------------------------------- dialogs
 
   Future<void> _addPeerDialog() async {
     final controller = TextEditingController();
@@ -123,7 +123,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Use this when broadcast discovery is blocked (some routers, '
+              'Use this when automatic discovery is blocked (some routers, '
               'VPNs or different subnets).',
             ),
             const SizedBox(height: 16),
@@ -153,6 +153,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     controller.dispose();
+    _focus.requestFocus();
     if (result == null) return;
     final (host, port) = _parseEndpoint(result);
     if (host == null) return;
@@ -179,61 +180,49 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _settingsDialog() async {
     final nameCtl = TextEditingController(text: service.name);
-    var autoAnswer = service.autoAnswer;
     final addrs = await _localAddresses();
     if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setLocal) => AlertDialog(
-          title: const Text('Settings'),
-          content: SizedBox(
-            width: 380,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: nameCtl,
-                  decoration: const InputDecoration(
-                    labelText: 'Device name shown to peers',
-                    border: OutlineInputBorder(),
-                  ),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Settings'),
+        content: SizedBox(
+          width: 380,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtl,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Device name shown to peers',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Auto-answer (intercom mode)'),
-                  subtitle: const Text(
-                    'Incoming calls connect immediately without ringing.',
-                  ),
-                  value: autoAnswer,
-                  onChanged: (v) => setLocal(() => autoAnswer = v),
-                ),
-                const Divider(),
-                Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
-                const SizedBox(height: 4),
-                SelectableText(
-                  'Addresses: ${addrs.isEmpty ? 'none' : addrs.join(', ')}\n'
-                  'TCP port: ${service.listenPort}\n'
-                  'Discovery: ${service.discoveryRunning ? 'UDP $discoveryPort broadcast' : 'off'}\n'
-                  'ID: ${service.selfId}',
-                  style: Theme.of(ctx).textTheme.bodySmall,
-                ),
-              ],
-            ),
+                onSubmitted: (_) => Navigator.pop(ctx, true),
+              ),
+              const SizedBox(height: 16),
+              Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SelectableText(
+                'Addresses: ${addrs.isEmpty ? 'none' : addrs.join(', ')}\n'
+                'TCP port: ${service.listenPort}\n'
+                'Discovery: ${service.discoveryRunning ? 'UDP $discoveryPort broadcast' : 'off'}',
+                style: Theme.of(ctx).textTheme.bodySmall,
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Save'),
-            ),
-          ],
         ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
     if (saved == true) {
@@ -242,10 +231,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         service.name = name;
         widget.settings.name = name;
       }
-      service.autoAnswer = autoAnswer;
-      widget.settings.autoAnswer = autoAnswer;
     }
     nameCtl.dispose();
+    _focus.requestFocus();
   }
 
   static Future<List<String>> _localAddresses() async {
@@ -268,48 +256,45 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     return ScaffoldMessenger(
       key: _messenger,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= _wideBreakpoint;
-          return Scaffold(
-            appBar: AppBar(
-              title: ListenableBuilder(
-                listenable: service,
-                builder: (context, _) => Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('P2P Intercom'),
-                    Text(
-                      'You are “${service.name}”',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
+      child: Focus(
+        focusNode: _focus,
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= _wideBreakpoint;
+            return Scaffold(
+              appBar: AppBar(
+                title: ListenableBuilder(
+                  listenable: service,
+                  builder: (context, _) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('P2P Intercom'),
+                      Text(
+                        'You are “${service.name}”',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
                 ),
+                actions: [
+                  IconButton(
+                    tooltip: 'Add peer by IP',
+                    onPressed: _addPeerDialog,
+                    icon: const Icon(Icons.add_link),
+                  ),
+                  IconButton(
+                    tooltip: 'Settings',
+                    onPressed: _settingsDialog,
+                    icon: const Icon(Icons.settings),
+                  ),
+                ],
               ),
-              actions: [
-                IconButton(
-                  tooltip: 'Add peer by IP',
-                  onPressed: _addPeerDialog,
-                  icon: const Icon(Icons.add_link),
-                ),
-                IconButton(
-                  tooltip: 'Settings',
-                  onPressed: _settingsDialog,
-                  icon: const Icon(Icons.settings),
-                ),
-              ],
-            ),
-            body: Column(
-              children: [
-                CallBar(
-                  service: service,
-                  onOpenPeer: (id) => _openPeerById(id, wide: wide),
-                ),
-                Expanded(child: wide ? _wideBody() : _narrowBody()),
-              ],
-            ),
-          );
-        },
+              body: wide ? _wideBody() : _narrowBody(),
+            );
+          },
+        ),
       ),
     );
   }
@@ -318,99 +303,26 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     return Row(
       children: [
         SizedBox(
-          width: 320,
-          child: PeerList(
-            service: service,
-            onSelect: (p) => _openPeer(p, wide: true),
-            onAddPeer: _addPeerDialog,
-          ),
+          width: 340,
+          child: PeerList(service: service, onAddPeer: _addPeerDialog),
         ),
         const VerticalDivider(width: 1),
         Expanded(
-          child: ListenableBuilder(
-            listenable: service,
-            builder: (context, _) {
-              final id = service.selectedPeerId;
-              if (id == null || service.peer(id) == null) {
-                return const _Placeholder();
-              }
-              return PeerPanel(key: ValueKey(id), service: service, peerId: id);
-            },
-          ),
+          child: Center(child: PttPanel(service: service)),
         ),
       ],
     );
   }
 
   Widget _narrowBody() {
-    // Nested navigator so the call bar and app bar stay put while the user
-    // moves between the peer list and a peer page.
-    return NavigatorPopHandler(
-      onPopWithResult: (_) => _phoneNav.currentState?.maybePop(),
-      child: Navigator(
-        key: _phoneNav,
-        onGenerateRoute: (_) => MaterialPageRoute<void>(
-          builder: (_) => PeerList(
-            service: service,
-            highlightSelection: false,
-            onSelect: (p) => _openPeer(p, wide: false),
-            onAddPeer: _addPeerDialog,
-          ),
+    return Column(
+      children: [
+        Expanded(
+          child: PeerList(service: service, onAddPeer: _addPeerDialog),
         ),
-      ),
-    );
-  }
-}
-
-class _PhonePeerPage extends StatelessWidget {
-  const _PhonePeerPage({required this.service, required this.peer});
-
-  final IntercomService service;
-  final Peer peer;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      child: Column(
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => Navigator.of(context).pop(),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('All peers'),
-            ),
-          ),
-          Expanded(
-            child: PeerPanel(service: service, peerId: peer.id),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Placeholder extends StatelessWidget {
-  const _Placeholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.settings_input_antenna,
-            size: 64,
-            color: Theme.of(context).colorScheme.outline,
-          ),
-          const SizedBox(height: 12),
-          Text(
-            'Select a peer to talk to',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ],
-      ),
+        const Divider(height: 1),
+        SafeArea(top: false, child: PttPanel(service: service, compact: true)),
+      ],
     );
   }
 }
