@@ -39,6 +39,10 @@ class Win32Window {
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 
+  // When set before the first |Show|, the window starts minimized to the
+  // taskbar without taking focus (used for autostart at sign-in).
+  void SetStartMinimized(bool minimized) { start_minimized_ = minimized; }
+
   // Release OS resources associated with window.
   void Destroy();
 
@@ -97,6 +101,7 @@ class Win32Window {
 
   // window handle for hosted content.
   HWND child_content_ = nullptr;
+  bool start_minimized_ = false;
 };
 
 #endif  // RUNNER_WIN32_WINDOW_H_

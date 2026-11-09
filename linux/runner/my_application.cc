@@ -16,7 +16,12 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GtkWidget* toplevel = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  gtk_widget_show(toplevel);
+  // "--minimized" is passed by the autostart entry (login).
+  if (g_object_get_data(G_OBJECT(toplevel), "start-minimized") != nullptr) {
+    gtk_window_iconify(GTK_WINDOW(toplevel));
+  }
 }
 
 // Implements GApplication::activate.
@@ -57,6 +62,10 @@ static void my_application_activate(GApplication* application) {
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
       project, self->dart_entrypoint_arguments);
+  if (self->dart_entrypoint_arguments != nullptr &&
+      g_strv_contains(self->dart_entrypoint_arguments, "--minimized")) {
+    g_object_set_data(G_OBJECT(window), "start-minimized", GINT_TO_POINTER(1));
+  }
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;

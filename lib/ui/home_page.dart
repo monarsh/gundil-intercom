@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../src/autostart.dart';
 import '../src/intercom_service.dart';
 import '../src/protocol.dart';
 import '../src/settings.dart';
@@ -128,51 +129,81 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _settingsDialog() async {
     final nameCtl = TextEditingController(text: service.name);
     final addrs = await _localAddresses();
+    final autostartWas = await Autostart.isEnabled();
+    var autostart = autostartWas;
     if (!mounted) return;
     final saved = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Settings'),
-        content: SizedBox(
-          width: 380,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: nameCtl,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: 'Device name shown to peers',
-                  border: OutlineInputBorder(),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Settings'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: nameCtl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Device name shown to peers',
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => Navigator.pop(ctx, true),
                 ),
-                onSubmitted: (_) => Navigator.pop(ctx, true),
-              ),
-              const SizedBox(height: 16),
-              Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
-              const SizedBox(height: 4),
-              SelectableText(
-                'Addresses: ${addrs.isEmpty ? 'none' : addrs.join(', ')}\n'
-                'TCP port: ${service.listenPort}\n'
-                'Discovery: ${service.discoveryRunning ? 'UDP $discoveryPort broadcast' : 'off'}',
-                style: Theme.of(ctx).textTheme.bodySmall,
-              ),
-            ],
+                if (Autostart.supported) ...[
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      Platform.isWindows
+                          ? 'Start with Windows'
+                          : 'Start automatically at login',
+                    ),
+                    subtitle: const Text(
+                      'Opens minimized when you sign in, ready to receive.',
+                    ),
+                    value: autostart,
+                    onChanged: (v) => setLocal(() => autostart = v),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
+                const SizedBox(height: 4),
+                SelectableText(
+                  'Addresses: ${addrs.isEmpty ? 'none' : addrs.join(', ')}\n'
+                  'TCP port: ${service.listenPort}\n'
+                  'Discovery: ${service.discoveryRunning ? 'UDP $discoveryPort broadcast' : 'off'}',
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Save'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
     if (saved == true) {
+      if (autostart != autostartWas) {
+        final now = await Autostart.setEnabled(autostart);
+        if (now != autostart && mounted) {
+          _messenger.currentState?.showSnackBar(
+            const SnackBar(
+              content: Text('Could not change the autostart setting'),
+            ),
+          );
+        }
+      }
       final name = nameCtl.text.trim();
       if (name.isNotEmpty) {
         service.name = name;

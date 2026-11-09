@@ -46,12 +46,15 @@ MinVersion=10.0
 PrivilegesRequired=admin
 CloseApplications=yes
 RestartApplications=no
+; The autostart entry is per-user (HKCU), matching the in-app setting.
+UsedUserAreasWarning=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+Name: "autostart"; Description: "Start {#MyAppName} automatically when I sign in to Windows (minimized)"; GroupDescription: "Startup:"; Flags: checkedonce
 
 [InstallDelete]
 ; Upgrading from "P2P Intercom": remove the old executable and shortcuts.
@@ -63,6 +66,10 @@ Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
 ; Flutter bundle: exe, flutter_windows.dll, intercom_audio.dll, data\, and the
 ; app-local Visual C++ runtime DLLs copied in by CI.
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Registry]
+; Same entry the app's "Start with Windows" switch reads and writes.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#MyAppName}"; ValueData: """{app}\{#MyAppExe}"" --minimized"; Flags: uninsdeletevalue; Tasks: autostart
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"

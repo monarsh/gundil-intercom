@@ -20,6 +20,8 @@ answering and no chat. It's audio only.
 - **Half-duplex like a real radio**: only one person is heard at a time.
   Incoming audio is muted while you're transmitting, so there's no feedback.
 - **Roger beep**: a short chirp when the other side lets go.
+- **Starts with Windows (or Linux login)**: optional. The app opens minimized
+  at sign-in, so the intercom is always ready to receive.
 - **Saved peers**: add a peer by IP (or keep a discovered one) and it stays in
   the list across restarts, greyed out while offline. The app keeps retrying
   in the background, so a saved peer comes online automatically. This also
@@ -129,6 +131,23 @@ these artifacts: a Linux tarball, the Windows installer
    until you remove it, even after the app restarts.
 6. Use a peer's **⋮** menu to **Edit** it (name, IP, port), **Rename** a
    discovered peer, **Keep in list**, or **Remove** it.
+
+### Start automatically
+
+- **Windows**: tick *"Start Gundil Intercom automatically when I sign in"* in
+  the installer, or turn on **Settings → Start with Windows** in the app
+  later. It starts minimized in the taskbar. (This uses the per-user
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry. You can also
+  turn it off in Task Manager → *Startup apps*.)
+- **Linux**: **Settings → Start automatically at login** creates
+  `~/.config/autostart/gundil-intercom.desktop`.
+- **Android**: not supported. Android doesn't let apps start themselves after
+  boot without a background service. Open the app once after the phone
+  restarts.
+
+Without the installer, you can do it by hand on Windows: press **Win+R**, type
+`shell:startup`, and put a shortcut to `gundil_intercom.exe` in that folder.
+Add `--minimized` to the shortcut's target if you want it to start minimized.
 
 Set `P2P_INTERCOM_PROFILE=<name>` to run several separate instances on the same
 computer, for example while testing.

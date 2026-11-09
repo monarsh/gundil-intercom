@@ -150,6 +150,10 @@ bool Win32Window::Create(const std::wstring& title,
 }
 
 bool Win32Window::Show() {
+  if (start_minimized_) {
+    start_minimized_ = false;  // Only the initial show.
+    return ShowWindow(window_handle_, SW_SHOWMINNOACTIVE);
+  }
   return ShowWindow(window_handle_, SW_SHOWNORMAL);
 }
 
