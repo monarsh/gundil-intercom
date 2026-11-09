@@ -29,7 +29,7 @@ class IntercomApp extends StatelessWidget {
   Widget build(BuildContext context) {
     const seed = Color(0xFF00897B);
     return MaterialApp(
-      title: 'P2P Intercom',
+      title: 'Gundil Intercom',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: seed,

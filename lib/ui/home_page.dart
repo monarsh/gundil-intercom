@@ -217,7 +217,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   builder: (context, _) => Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('P2P Intercom'),
+                      const Text('Gundil Intercom'),
                       Text(
                         'You are “${service.name}”',
                         style: Theme.of(context).textTheme.bodySmall,

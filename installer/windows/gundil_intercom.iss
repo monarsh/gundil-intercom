@@ -1,8 +1,8 @@
-; Inno Setup script for the P2P Intercom Windows installer.
+; Inno Setup script for the Gundil Intercom Windows installer.
 ;
 ; Build (on Windows, after `flutter build windows --release`):
-;   iscc /DMyAppVersion=1.0.0 installer\windows\p2p_intercom.iss
-; Output: build\installer\p2p-intercom-setup-<version>.exe
+;   iscc /DMyAppVersion=1.0.0 installer\windows\gundil_intercom.iss
+; Output: build\installer\gundil-intercom-setup-<version>.exe
 ;
 ; Paths are relative to this file.
 
@@ -13,9 +13,12 @@
   #define SourceDir "..\..\build\windows\x64\runner\Release"
 #endif
 
-#define MyAppName "P2P Intercom"
-#define MyAppExe "p2p_intercom.exe"
-#define FirewallRule "P2P Intercom"
+#define MyAppName "Gundil Intercom"
+#define MyAppExe "gundil_intercom.exe"
+#define FirewallRule "Gundil Intercom"
+; Names used before the app was renamed (cleaned up on upgrade).
+#define OldAppName "P2P Intercom"
+#define OldAppExe "p2p_intercom.exe"
 
 [Setup]
 ; Never change AppId: upgrades and uninstall are matched on it.
@@ -23,13 +26,13 @@ AppId={{8F1B6C2E-3C4A-4E7B-9A51-2D7E0C6B4F11}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
-AppPublisher=P2P Intercom
+AppPublisher=Gundil Intercom
 VersionInfoVersion={#MyAppVersion}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\..\build\installer
-OutputBaseFilename=p2p-intercom-setup-{#MyAppVersion}
+OutputBaseFilename=gundil-intercom-setup-{#MyAppVersion}
 SetupIconFile=..\..\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExe}
 UninstallDisplayName={#MyAppName}
@@ -50,6 +53,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; Upgrading from "P2P Intercom": remove the old executable and shortcuts.
+Type: files; Name: "{app}\{#OldAppExe}"
+Type: files; Name: "{autoprograms}\{#OldAppName}.lnk"
+Type: files; Name: "{autodesktop}\{#OldAppName}.lnk"
+
 [Files]
 ; Flutter bundle: exe, flutter_windows.dll, intercom_audio.dll, data\, and the
 ; app-local Visual C++ runtime DLLs copied in by CI.
@@ -60,6 +69,7 @@ Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExe}"; Tasks: desktopicon
 
 [Run]
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#OldAppName}"""; Flags: runhidden waituntilterminated
 ; Allow incoming TCP 47801 (audio) and UDP 47800 (discovery) for the app on
 ; private/domain networks, so Windows doesn't block peers.
 Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""{#FirewallRule}"""; Flags: runhidden waituntilterminated

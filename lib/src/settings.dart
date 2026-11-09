@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'models.dart';
@@ -22,8 +23,32 @@ class Settings {
     return (profile == null || profile.isEmpty) ? '' : '$profile.';
   }
 
-  static Future<Settings> load() async =>
-      Settings._(await SharedPreferences.getInstance());
+  static Future<Settings> load() async {
+    await _migrateWindowsDataFolder();
+    return Settings._(await SharedPreferences.getInstance());
+  }
+
+  /// On Windows, settings live in %APPDATA%\<company>\<product name>. The
+  /// product was renamed from "P2P Intercom" to "Gundil Intercom", so copy
+  /// the old settings file (device id, name, saved peers) over once.
+  static Future<void> _migrateWindowsDataFolder() async {
+    if (!Platform.isWindows) return;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      const fileName = 'shared_preferences.json';
+      final current = File('${dir.path}${Platform.pathSeparator}$fileName');
+      if (current.existsSync()) return;
+      final old = File(
+        '${dir.parent.path}${Platform.pathSeparator}P2P Intercom'
+        '${Platform.pathSeparator}$fileName',
+      );
+      if (!old.existsSync()) return;
+      await current.parent.create(recursive: true);
+      await old.copy(current.path);
+    } catch (_) {
+      // Best effort: worst case the user re-adds their peers.
+    }
+  }
 
   /// Stable random identifier of this installation.
   String get deviceId {

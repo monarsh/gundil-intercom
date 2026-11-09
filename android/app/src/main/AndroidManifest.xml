@@ -12,7 +12,7 @@
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <application
-        android:label="P2P Intercom"
+        android:label="Gundil Intercom"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

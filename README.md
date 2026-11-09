@@ -1,4 +1,4 @@
-# P2P Intercom
+# Gundil Intercom
 
 A serverless, peer-to-peer **push-to-talk intercom over TCP/IP** for **Linux,
 Windows and Android**. It works like a walkie-talkie: pick who to talk to, hold
@@ -81,22 +81,22 @@ flutter test                      # unit + end-to-end (localhost TCP) tests
 
 ```bash
 flutter build linux --release
-./build/linux/x64/release/bundle/p2p_intercom
+./build/linux/x64/release/bundle/gundil_intercom
 ```
 
 **Windows** (needs Visual Studio 2022 with "Desktop development with C++"):
 
 ```powershell
 flutter build windows --release
-build\windows\x64\runner\Release\p2p_intercom.exe
+build\windows\x64\runner\Release\gundil_intercom.exe
 ```
 
 To build the installer (`setup.exe`) as well, install
 [Inno Setup 6](https://jrsoftware.org/isinfo.php) and run:
 
 ```powershell
-iscc /DMyAppVersion=1.0.0 installer\windows\p2p_intercom.iss
-# -> build\installer\p2p-intercom-setup-1.0.0.exe
+iscc /DMyAppVersion=1.0.0 installer\windows\gundil_intercom.iss
+# -> build\installer\gundil-intercom-setup-1.0.0.exe
 ```
 
 The installer puts the app in Program Files, adds a Start-menu shortcut (a
@@ -113,7 +113,7 @@ adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 
 Every push runs `.github/workflows/build.yml`, which tests the code and uploads
 these artifacts: a Linux tarball, the Windows installer
-(`p2p-intercom-windows-setup`), a portable Windows folder, and Android APKs.
+(`gundil-intercom-windows-setup`), a portable Windows folder, and Android APKs.
 
 ## Usage
 

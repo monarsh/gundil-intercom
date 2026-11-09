@@ -29,11 +29,11 @@ jobs:
           channel: stable
           cache: true
       - run: flutter build linux --release
-      - run: tar -C build/linux/x64/release -czf p2p-intercom-linux-x64.tar.gz bundle
+      - run: tar -C build/linux/x64/release -czf gundil-intercom-linux-x64.tar.gz bundle
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-intercom-linux-x64
-          path: p2p-intercom-linux-x64.tar.gz
+          name: gundil-intercom-linux-x64
+          path: gundil-intercom-linux-x64.tar.gz
 
   windows:
     needs: test
@@ -58,15 +58,15 @@ jobs:
           $ver = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          & $iscc "/DMyAppVersion=$ver" installer\windows\p2p_intercom.iss
+          & $iscc "/DMyAppVersion=$ver" installer\windows\gundil_intercom.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-intercom-windows-setup
+          name: gundil-intercom-windows-setup
           path: build/installer/*.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-intercom-windows-x64-portable
+          name: gundil-intercom-windows-x64-portable
           path: build/windows/x64/runner/Release/
 
   android:
@@ -85,5 +85,5 @@ jobs:
       - run: flutter build apk --release --split-per-abi
       - uses: actions/upload-artifact@v4
         with:
-          name: p2p-intercom-android
+          name: gundil-intercom-android
           path: build/app/outputs/flutter-apk/*.apk
