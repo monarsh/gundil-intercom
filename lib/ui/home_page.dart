@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import '../src/autostart.dart';
 import '../src/intercom_service.dart';
 import '../src/platform_bridge.dart';
-import '../src/protocol.dart';
 import '../src/settings.dart';
 import '../src/window_bridge.dart';
 import 'peer_dialog.dart';

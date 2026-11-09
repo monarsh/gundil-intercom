@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../src/protocol.dart';
+import 'package:intercom_core/intercom_core.dart';
 
 /// Result of the add/edit peer dialog.
 class PeerFormResult {

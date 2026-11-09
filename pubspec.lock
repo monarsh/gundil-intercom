@@ -127,6 +127,13 @@ packages:
       relative: true
     source: path
     version: "1.0.0"
+  intercom_core:
+    dependency: "direct main"
+    description:
+      path: "packages/intercom_core"
+      relative: true
+    source: path
+    version: "1.0.0"
   jni:
     dependency: transitive
     description:

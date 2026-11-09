@@ -1,0 +1,33 @@
+# Gundil Intercom node configuration (/etc/gundil-intercom/node.conf)
+# Restart after editing:  sudo systemctl restart gundil-intercom-node
+
+# Name shown on the other intercoms (phones, PCs). Default: hostname.
+name = Gate
+
+# Who the push-to-talk button talks to: "everyone", or the name of one
+# intercom exactly as it appears in the list (e.g. "Office-PC").
+target = everyone
+
+# Push-to-talk button on the GPIO header.
+# Orange Pi PC: physical pin 7 = PA6 = GPIO 6. Wire the button between
+# pin 7 and GND (pin 9). See README.md for other pins.
+ptt-gpio = 6
+ptt-gpio-active-low = true
+
+# Optional LED (with a 330 ohm resistor) lit while talking or receiving.
+# Orange Pi PC: physical pin 11 = PA1 = GPIO 1; LED cathode to GND (pin 9).
+#led-gpio = 1
+
+# auto = use libgpiod tools if installed (supports internal pull-up),
+# otherwise /sys/class/gpio.
+gpio-backend = auto
+
+# Optional: USB keyboard / foot pedal / USB button as push-to-talk.
+# Find the device with:  ls -l /dev/input/by-id/
+#ptt-input = /dev/input/by-id/usb-XXXX-event-kbd
+#ptt-key = 57        # 57 = Space, 28 = Enter
+
+# Intercoms to add by IP if broadcast discovery doesn't reach them.
+#peers = 192.168.1.20, 192.168.1.21:47801
+
+roger-beep = true

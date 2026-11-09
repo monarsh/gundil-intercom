@@ -5,8 +5,7 @@ import 'dart:math';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'models.dart';
-import 'protocol.dart';
+import 'package:intercom_core/intercom_core.dart';
 
 /// Persistent user settings.
 ///

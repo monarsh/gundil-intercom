@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import 'package:intercom_core/intercom_core.dart';
+
 /// Thin bridge to Android-only platform features implemented in
 /// `MainActivity.kt`. Every call is a no-op on desktop platforms.
 class PlatformBridge {
@@ -72,4 +74,18 @@ class PlatformBridge {
       // Running in a test harness.
     }
   }
+}
+
+/// Android implementations of the engine's platform hooks.
+class FlutterPlatformHooks extends PlatformHooks {
+  const FlutterPlatformHooks();
+
+  @override
+  Future<bool> requestMicrophone() => PlatformBridge.requestMicrophone();
+
+  @override
+  Future<void> acquireMulticastLock() => PlatformBridge.acquireMulticastLock();
+
+  @override
+  Future<void> releaseMulticastLock() => PlatformBridge.releaseMulticastLock();
 }

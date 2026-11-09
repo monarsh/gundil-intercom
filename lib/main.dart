@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'src/audio_engine.dart';
 import 'src/intercom_service.dart';
 import 'src/settings.dart';
 import 'src/window_bridge.dart';

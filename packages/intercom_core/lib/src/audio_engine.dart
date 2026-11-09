@@ -1,6 +1,6 @@
 import 'dart:typed_data';
 
-import 'package:intercom_audio/intercom_audio.dart';
+import 'native_audio_bindings.dart';
 
 /// Abstraction over the microphone/speaker so the intercom logic can be tested
 /// without real audio hardware. Capture and playback are independent because

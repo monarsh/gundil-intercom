@@ -2,9 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:p2p_intercom/src/audio_engine.dart';
 import 'package:p2p_intercom/src/intercom_service.dart';
-import 'package:p2p_intercom/src/models.dart';
 
 /// Polls [condition] until true or fails after [timeout].
 Future<void> eventually(
@@ -355,9 +353,9 @@ void main() {
   });
 
   test('rmsLevel and roger tone', () {
-    expect(IntercomService.rmsLevel(Int16List(100)), 0);
-    expect(IntercomService.rmsLevel(tone(100, 32767)), closeTo(1, 0.01));
-    final beep = IntercomService.rogerTone(16000);
+    expect(IntercomCore.rmsLevel(Int16List(100)), 0);
+    expect(IntercomCore.rmsLevel(tone(100, 32767)), closeTo(1, 0.01));
+    final beep = IntercomCore.rogerTone(16000);
     expect(beep.length, 16000 * 140 ~/ 1000);
     expect(beep.reduce((a, b) => a > b ? a : b), lessThanOrEqualTo(5000));
   });

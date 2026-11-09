@@ -15,8 +15,11 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
+      - run: (cd packages/intercom_core && dart pub get)
+      - run: (cd packages/intercom_audio && flutter pub get)
       - run: flutter analyze
       - run: flutter test
+      - run: (cd packages/intercom_core && dart test)
 
   linux:
     needs: test
@@ -87,3 +90,25 @@ jobs:
         with:
           name: gundil-intercom-android
           path: build/app/outputs/flutter-apk/*.apk
+
+  node:
+    # Headless node for Orange Pi / Raspberry Pi (32-bit and 64-bit ARM).
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: pip install ziglang
+      - run: tool/build_node.sh arm
+      - run: tool/build_node.sh arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-node-linux-arm
+          path: build/node/gundil-intercom-node-linux-arm.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-node-linux-arm64
+          path: build/node/gundil-intercom-node-linux-arm64.tar.gz

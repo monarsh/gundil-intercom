@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../src/intercom_service.dart';
-import '../src/models.dart';
 import 'peer_dialog.dart';
 import 'widgets.dart';
 

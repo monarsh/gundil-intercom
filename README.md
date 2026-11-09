@@ -33,6 +33,20 @@ answering and no chat. It's audio only.
   its IP/port, keep it in the list, or remove it. If a saved device gets a new
   IP, the saved address updates itself once the device is seen again.
 
+## Orange Pi PC / Raspberry Pi (headless node)
+
+Small Linux boards with a microphone and a speaker jack can be intercom
+stations without a screen. The **headless node** joins the same intercom
+network, plays incoming talk on the jack, transmits while a **GPIO
+push-to-talk button** (or USB key/foot pedal) is held, can drive an LED, and
+starts on boot. The Orange Pi PC (32-bit ARM) uses
+`gundil-intercom-node-linux-arm.tar.gz`; 64-bit boards use `…-arm64`.
+Setup, wiring and pin tables are in **[node/README.md](node/README.md)**.
+
+```bash
+tool/build_node.sh arm      # or arm64 / x64  -> build/node/*.tar.gz
+```
+
 ## How it works
 
 ```
@@ -50,10 +64,10 @@ answering and no chat. It's audio only.
 
 | Layer | File | Notes |
 |---|---|---|
-| Discovery | `lib/src/discovery.dart` | JSON beacon every 2 s to `255.255.255.255` and each interface's /24 broadcast address. A peer counts as offline after 7 s without a beacon. |
-| Transport | `lib/src/peer_connection.dart` | One persistent TCP socket per peer pair, `TCP_NODELAY`. |
-| Protocol | `lib/src/protocol.dart` | Each frame is `[type:1][length:4 BE][payload]`. |
-| Push-to-talk logic | `lib/src/intercom_service.dart` | Peers, channel selection, transmit and receive. |
+| Discovery | `packages/intercom_core/lib/src/discovery.dart` | JSON beacon every 2 s to `255.255.255.255` and each interface's /24 broadcast address. A peer counts as offline after 7 s without a beacon. |
+| Transport | `packages/intercom_core/lib/src/peer_connection.dart` | One persistent TCP socket per peer pair, `TCP_NODELAY`. |
+| Protocol | `packages/intercom_core/lib/src/protocol.dart` | Each frame is `[type:1][length:4 BE][payload]`. |
+| Push-to-talk logic | `packages/intercom_core/lib/src/intercom_core.dart` | Peers, channel selection, transmit and receive. Pure Dart, shared by the app and the headless node. |
 | Audio | `packages/intercom_audio` | Flutter FFI plugin built on [miniaudio](https://miniaud.io), with lock-free ring buffers between the native audio threads and Dart. The mic is open only while you hold the button. |
 | Android glue | `android/.../MainActivity.kt` | Mic permission and the Wi-Fi multicast lock (needed to receive discovery broadcasts). |
 
@@ -210,13 +224,21 @@ computer, for example while testing.
 ## Project layout
 
 ```
-lib/
+lib/                        Flutter app
   main.dart                 app entry, theme
-  src/                      networking, protocol, push-to-talk logic (no UI)
-  ui/                       home page, channel list, push-to-talk panel
-packages/intercom_audio/    FFI audio plugin (C + miniaudio)
+  src/                      Flutter glue: ChangeNotifier wrapper, settings,
+                            Android/Windows platform bridges, autostart
+  ui/                       home page, peer list, push-to-talk panel
+packages/intercom_core/     pure-Dart engine: protocol, discovery, push-to-talk
+                            logic, FFI audio bindings, and the headless node
+                            (bin/gundil_node.dart, GPIO, config)
+packages/intercom_audio/    Flutter plugin that builds the C audio library
+                            (miniaudio) for Linux, Windows and Android
+node/                       headless node install files (systemd, setup
+                            scripts, README for Orange Pi)
+tool/build_node.sh          builds node tarballs (arm, arm64, x64)
 android/ linux/ windows/    platform runners
-test/                       protocol + multi-node integration tests
+test/                       app tests (protocol, multi-node integration)
 ```
 
 ## License

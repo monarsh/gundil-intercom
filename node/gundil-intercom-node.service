@@ -1,0 +1,17 @@
+[Unit]
+Description=Gundil Intercom headless node (push-to-talk LAN intercom)
+Wants=network-online.target sound.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+ExecStart=/opt/gundil-intercom/gundil-intercom-node --config=/etc/gundil-intercom/node.conf
+Restart=always
+RestartSec=3
+# Root is the simplest way to reach /dev/snd and the GPIO pins on Armbian /
+# Orange Pi images.
+User=root
+Nice=-5
+
+[Install]
+WantedBy=multi-user.target
