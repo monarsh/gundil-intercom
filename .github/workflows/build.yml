@@ -115,6 +115,7 @@ jobs:
           channel: stable
           cache: true
       - run: flutter build apk --release --split-per-abi
+      - run: flutter build apk --release   # universal APK (all CPUs)
       - uses: actions/upload-artifact@v4
         with:
           name: gundil-intercom-android
@@ -141,3 +142,45 @@ jobs:
         with:
           name: gundil-intercom-node-linux-arm64
           path: build/node/gundil-intercom-node-linux-arm64.tar.gz
+
+  release:
+    # Publishes a GitHub Release with every build when a v* tag is pushed:
+    #   git tag v1.0.0 && git push origin v1.0.0
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, linux-arm64, windows, android, node]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect and name release files
+        run: |
+          set -euo pipefail
+          V="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          A=artifacts
+          cp "$A"/gundil-intercom-windows-setup/*.exe "dist/GundilIntercom-$V-windows-x64-setup.exe"
+          (cd "$A/gundil-intercom-windows-x64-portable" && zip -qr "$GITHUB_WORKSPACE/dist/GundilIntercom-$V-windows-x64-portable.zip" .)
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "$A/gundil-intercom-android/app-$abi-release.apk" "dist/GundilIntercom-$V-android-$abi.apk"
+          done
+          cp "$A/gundil-intercom-android/app-release.apk" "dist/GundilIntercom-$V-android-universal.apk"
+          cp "$A"/gundil-intercom-appimage-x86_64/*.AppImage "dist/GundilIntercom-$V-x86_64.AppImage"
+          cp "$A"/gundil-intercom-appimage-aarch64/*.AppImage "dist/GundilIntercom-$V-aarch64.AppImage"
+          cp "$A/gundil-intercom-linux-x64/gundil-intercom-linux-x64.tar.gz" "dist/GundilIntercom-$V-linux-x64.tar.gz"
+          cp "$A/gundil-intercom-linux-arm64/gundil-intercom-linux-arm64.tar.gz" "dist/GundilIntercom-$V-linux-arm64.tar.gz"
+          cp "$A/gundil-intercom-node-linux-arm/gundil-intercom-node-linux-arm.tar.gz" "dist/gundil-intercom-node-$V-linux-arm.tar.gz"
+          cp "$A/gundil-intercom-node-linux-arm64/gundil-intercom-node-linux-arm64.tar.gz" "dist/gundil-intercom-node-$V-linux-arm64.tar.gz"
+          chmod +x dist/*.AppImage
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          sed "s/VERSION/$V/g" .github/release/notes.md > release-notes.md
+          ls -la dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Gundil Intercom ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: dist/*
+          fail_on_unmatched_files: true
