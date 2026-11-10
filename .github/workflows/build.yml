@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a GitHub Release with this tag (e.g. v1.0.0). Leave empty for a normal build.'
+        required: false
+        default: ''
 
 jobs:
   test:
@@ -144,9 +149,13 @@ jobs:
           path: build/node/gundil-intercom-node-linux-arm64.tar.gz
 
   release:
-    # Publishes a GitHub Release with every build when a v* tag is pushed:
-    #   git tag v1.0.0 && git push origin v1.0.0
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Publishes a GitHub Release with every build, either when a v* tag is
+    # pushed (git tag v1.0.0 && git push origin v1.0.0) or when the workflow
+    # is run by hand with the "release" input (the tag is then created on
+    # the built commit).
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release != '')
     needs: [linux, linux-arm64, windows, android, node]
     runs-on: ubuntu-latest
     permissions:
@@ -159,7 +168,8 @@ jobs:
       - name: Collect and name release files
         run: |
           set -euo pipefail
-          V="${GITHUB_REF_NAME#v}"
+          TAG="${{ inputs.release || github.ref_name }}"
+          V="${TAG#v}"
           mkdir -p dist
           A=artifacts
           cp "$A"/gundil-intercom-windows-setup/*.exe "dist/GundilIntercom-$V-windows-x64-setup.exe"
@@ -180,7 +190,9 @@ jobs:
           ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
-          name: Gundil Intercom ${{ github.ref_name }}
+          tag_name: ${{ inputs.release || github.ref_name }}
+          target_commitish: ${{ github.sha }}
+          name: Gundil Intercom ${{ inputs.release || github.ref_name }}
           body_path: release-notes.md
           files: dist/*
           fail_on_unmatched_files: true
