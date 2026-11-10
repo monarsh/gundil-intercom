@@ -21,7 +21,7 @@ Intercoms find each other automatically on the same Wi-Fi/LAN. No server, no acc
 - **Android:** allow *Install unknown apps*. The APKs are signed with a development key, which is fine for installing yourself, not for the Play Store. For always-on use, turn on *Settings → Run in background*.
 - **Linux AppImage:** on Ubuntu 22.04+ you may need `sudo apt install libfuse2` (`libfuse2t64` on 24.04), or run it with `--appimage-extract-and-run`.
 - **Orange Pi PC / Raspberry Pi node:** `tar xzf gundil-intercom-node-*.tar.gz`, `cd` into the folder, then `sudo ./install.sh`. It answers incoming connections automatically and connects with a GPIO button. Wiring and audio setup are in [node/README.md](https://github.com/monarsh/p2p-intercom/blob/vVERSION/node/README.md).
-- **All devices must run this version.** Older push-to-talk builds show as *Needs update* and can't connect.
+- **All devices need 1.0.0 or newer** (two-way audio). Older push-to-talk builds show as *Needs update* and can't connect.
 
 ## Network
 
