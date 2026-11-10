@@ -28,12 +28,22 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         app.activity = this
-        if (app.backgroundEnabled) app.startBackgroundService()
     }
 
     override fun onResume() {
         super.onResume()
         app.activity = this
+        // While visible, (re)start the background service with the
+        // microphone type so two-way audio keeps working in the background.
+        if (app.backgroundEnabled) app.startBackgroundService(withMic = true)
+    }
+
+    fun setKeepScreenOn(on: Boolean) {
+        if (on) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     override fun onDestroy() {

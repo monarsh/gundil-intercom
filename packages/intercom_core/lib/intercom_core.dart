@@ -3,6 +3,8 @@ library;
 
 export 'src/audio_engine.dart';
 export 'src/discovery.dart';
+export 'src/echo_suppressor.dart';
+export 'src/mixer.dart';
 export 'src/intercom_core.dart';
 export 'src/models.dart';
 export 'src/native_audio_bindings.dart' show IntercomAudio, AudioException;

@@ -12,6 +12,7 @@ class DiscoveryBeacon {
     required this.platform,
     required this.address,
     required this.tcpPort,
+    this.version = 1,
     this.leaving = false,
   });
 
@@ -20,6 +21,7 @@ class DiscoveryBeacon {
   final String platform;
   final InternetAddress address;
   final int tcpPort;
+  final int version;
   final bool leaving;
 }
 
@@ -167,6 +169,7 @@ class Discovery {
         platform: (m['platform'] as String?) ?? '?',
         address: from,
         tcpPort: port,
+        version: (m['v'] as int?) ?? 1,
         leaving: m['bye'] == true,
       );
     } catch (_) {

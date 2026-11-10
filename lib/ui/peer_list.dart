@@ -7,7 +7,7 @@ import 'widgets.dart';
 enum _PeerAction { edit, save, remove }
 
 /// Channel selector: "Everyone" plus every known peer. The selected entry is
-/// who push-to-talk transmits to; tapping another one switches instantly.
+/// who CONNECT opens a two-way line with; tapping another one switches.
 ///
 /// Saved peers (bookmark icon) stay in the list across restarts, even when
 /// offline. Every peer has a ⋮ menu to edit, save or remove it.
@@ -60,7 +60,8 @@ class PeerList extends StatelessWidget {
   Widget _everyone(BuildContext context, int online) {
     final scheme = Theme.of(context).colorScheme;
     final selected = service.target is EveryoneTarget;
-    final talkingGroup = service.incoming?.group ?? false;
+    final conv = service.conversation;
+    final groupActive = conv != null && conv.group && conv.outgoing;
     return ListTile(
       selected: selected,
       selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.6),
@@ -78,8 +79,8 @@ class PeerList extends StatelessWidget {
       ),
       trailing: Padding(
         padding: const EdgeInsets.only(right: 12),
-        child: talkingGroup
-            ? const Icon(Icons.volume_up, color: Colors.green)
+        child: groupActive
+            ? const Icon(Icons.call, color: Colors.green)
             : _radio(selected),
       ),
       onTap: () => service.selectTarget(const EveryoneTarget()),
@@ -90,7 +91,7 @@ class PeerList extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final id = e.peerId;
     final selected = id != null && service.target == PeerTarget(id);
-    final talking = id != null && service.incoming?.peerId == id;
+    final state = id == null ? null : service.memberState(id);
     final muted = e.online ? null : scheme.onSurface.withValues(alpha: 0.45);
 
     return ListTile(
@@ -118,11 +119,14 @@ class PeerList extends StatelessWidget {
           const SizedBox(width: 4),
           Flexible(
             child: Text(
-              talking
-                  ? 'Talking…'
-                  : e.online
-                  ? e.host
-                  : 'Offline · ${e.host}',
+              switch (state) {
+                MemberState.connected => 'Connected',
+                MemberState.calling => 'Calling…',
+                MemberState.ringing => 'Wants to talk',
+                null when e.live?.outdated ?? false =>
+                  'Needs update for two-way audio',
+                null => e.online ? e.host : 'Offline · ${e.host}',
+              },
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: muted),
             ),
@@ -132,8 +136,12 @@ class PeerList extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (talking)
-            const Icon(Icons.volume_up, color: Colors.green)
+          if (state != null)
+            Icon(switch (state) {
+              MemberState.connected => Icons.call,
+              MemberState.calling => Icons.phone_forwarded,
+              MemberState.ringing => Icons.ring_volume,
+            }, color: Colors.green)
           else if (e.online)
             _radio(selected),
           _menu(context, e),

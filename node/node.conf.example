@@ -4,17 +4,29 @@
 # Name shown on the other intercoms (phones, PCs). Default: hostname.
 name = Gate
 
-# Who the push-to-talk button talks to: "everyone", or the name of one
-# intercom exactly as it appears in the list (e.g. "Office-PC").
+# Two-way audio: when another intercom connects, the line opens at once
+# (door-station behaviour) and both sides talk and listen until one hangs
+# up. Set to false to ring instead (press the button to accept).
+auto-answer = true
+
+# Who the button connects to: "everyone", or the name of one intercom
+# exactly as it appears in the list (e.g. "Office-PC").
 target = everyone
 
-# Push-to-talk button on the GPIO header.
-# Orange Pi PC: physical pin 7 = PA6 = GPIO 6. Wire the button between
-# pin 7 and GND (pin 9). See README.md for other pins.
-ptt-gpio = 6
-ptt-gpio-active-low = true
+# Button on the GPIO header: press to connect, press again to hang up
+# (or to accept a ringing call when auto-answer = false).
+# Orange Pi PC: physical pin 7 = PA6 = GPIO 6. Raspberry Pi: GPIO 17 =
+# physical pin 11. Wire the button between that pin and GND.
+# See README.md for other pins.
+button-gpio = 6
+button-gpio-active-low = true
 
-# Optional LED (with a 330 ohm resistor) lit while talking or receiving.
+# Lowers the microphone while the other side talks, so they don't hear
+# their own voice echoed back from this speaker. Turn off with a headset.
+echo-suppression = true
+
+# Optional LED (with a 330 ohm resistor): on while connected, blinking while
+# calling or ringing.
 # Orange Pi PC: physical pin 11 = PA1 = GPIO 1; LED cathode to GND (pin 9).
 #led-gpio = 1
 
@@ -22,12 +34,13 @@ ptt-gpio-active-low = true
 # otherwise /sys/class/gpio.
 gpio-backend = auto
 
-# Optional: USB keyboard / foot pedal / USB button as push-to-talk.
+# Optional: USB keyboard / foot pedal / USB button as the connect button.
 # Find the device with:  ls -l /dev/input/by-id/
-#ptt-input = /dev/input/by-id/usb-XXXX-event-kbd
-#ptt-key = 57        # 57 = Space, 28 = Enter
+#button-input = /dev/input/by-id/usb-XXXX-event-kbd
+#button-key = 57     # 57 = Space, 28 = Enter
 
 # Intercoms to add by IP if broadcast discovery doesn't reach them.
 #peers = 192.168.1.20, 192.168.1.21:47801
 
-roger-beep = true
+# Connect / hang-up / ring tones.
+tones = true

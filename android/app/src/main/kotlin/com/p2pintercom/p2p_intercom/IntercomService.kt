@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.Manifest
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -25,7 +27,10 @@ class IntercomService : Service() {
     companion object {
         private const val CHANNEL_ID = "intercom_background"
         private const val NOTIFICATION_ID = 4712
+        const val EXTRA_WITH_MIC = "with_mic"
     }
+
+    private var withMic = false
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
@@ -38,6 +43,12 @@ class IntercomService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Upgrade to the microphone type when started from the visible app.
+        val mic = intent?.getBooleanExtra(EXTRA_WITH_MIC, false) ?: false
+        if (mic && !withMic) {
+            withMic = true
+            goForeground()
+        }
         // If the system kills us under memory pressure, come back.
         return START_STICKY
     }
@@ -77,22 +88,44 @@ class IntercomService : Service() {
             Notification.Builder(this).setPriority(Notification.PRIORITY_LOW)
         }
         val notification = builder
-            .setContentTitle("Gundil Intercom is listening")
-            .setContentText("Tap to open and talk")
+            .setContentTitle("Gundil Intercom is ready")
+            .setContentText("Other intercoms can connect for two-way talk. Tap to open.")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(open)
             .setOngoing(true)
             .setShowWhen(false)
             .build()
 
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        val micAllowed = withMic &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        try {
+            when {
+                Build.VERSION.SDK_INT >= 34 -> startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or
+                        (if (micAllowed) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0)
+                )
+                Build.VERSION.SDK_INT >= 30 -> startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    if (micAllowed) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
+                )
+                else -> startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            // Not allowed to add the microphone type right now (app in the
+            // background); keep running without it.
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
         }
     }
 

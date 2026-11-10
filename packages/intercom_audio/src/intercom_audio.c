@@ -123,9 +123,10 @@ int32_t ia_start_capture(void) {
   cfg.periodSizeInMilliseconds = 20;
   cfg.dataCallback = capture_cb;
 #if defined(__ANDROID__)
-  // Half-duplex push-to-talk: no echo canceller needed, just a clean mic.
-  cfg.aaudio.inputPreset = ma_aaudio_input_preset_voice_recognition;
-  cfg.opensl.recordingPreset = ma_opensl_recording_preset_voice_recognition;
+  // Two-way audio: the voice-communication path enables the phone's
+  // acoustic echo canceller and noise suppression.
+  cfg.aaudio.inputPreset = ma_aaudio_input_preset_voice_communication;
+  cfg.opensl.recordingPreset = ma_opensl_recording_preset_voice_communication;
 #endif
   ma_result r = ma_device_init(&g_context, &cfg, &g_capture);
   if (r != MA_SUCCESS) {
@@ -163,11 +164,11 @@ int32_t ia_start_playback(void) {
   cfg.periodSizeInMilliseconds = 20;
   cfg.dataCallback = playback_cb;
 #if defined(__ANDROID__)
-  // Walkie-talkie: play loud through the loudspeaker (media path), not the
-  // earpiece that the voice-call path would pick.
-  cfg.aaudio.usage = ma_aaudio_usage_media;
+  // Must be on the voice-call path for the echo canceller to see what we
+  // play. Loudspeaker vs. earpiece is chosen in MainActivity/GundilApp.
+  cfg.aaudio.usage = ma_aaudio_usage_voice_communication;
   cfg.aaudio.contentType = ma_aaudio_content_type_speech;
-  cfg.opensl.streamType = ma_opensl_stream_type_media;
+  cfg.opensl.streamType = ma_opensl_stream_type_voice;
 #endif
   ma_result r = ma_device_init(&g_context, &cfg, &g_playback);
   if (r != MA_SUCCESS) {

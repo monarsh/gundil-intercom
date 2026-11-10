@@ -15,19 +15,27 @@ class NodeConfig {
   static const Map<String, String> options = {
     'name': 'Name shown to other intercoms (default: hostname)',
     'target':
-        '"everyone" or the name of one peer to talk to (default: everyone)',
+        '"everyone" or the name of the intercom the button connects to '
+        '(default: everyone)',
+    'auto-answer':
+        'Open incoming connections at once (default true). false = ring '
+        'and wait for the button / "a"',
+    'echo-suppression':
+        'Lower the mic while the other side talks (default true)',
     'peers': 'Comma-separated host[:port] list to add by IP (optional)',
-    'ptt-gpio': 'GPIO number of the push-to-talk button (e.g. 6 = PA6, pin 7)',
-    'ptt-gpio-active-low':
+    'button-gpio':
+        'GPIO number of the connect / hang-up button (e.g. 6 = PA6, pin 7)',
+    'button-gpio-active-low':
         'true if the button connects the pin to GND (default true)',
     'gpio-backend': 'auto | gpiod | sysfs (default auto)',
     'gpio-chip': 'gpiochip for the gpiod backend (default gpiochip0)',
     'led-gpio':
-        'GPIO number of an LED lit while talking or receiving (optional)',
-    'ptt-input':
+        'GPIO number of an LED: on while connected, blinking while calling '
+        'or ringing (optional)',
+    'button-input':
         'Input device for a USB button/keyboard, e.g. /dev/input/event0',
-    'ptt-key': 'Key code for ptt-input (default 57 = Space; 28 = Enter)',
-    'roger-beep': 'Play a beep when the other side lets go (default true)',
+    'button-key': 'Key code for button-input (default 57 = Space; 28 = Enter)',
+    'tones': 'Play connect / hang-up / ring tones (default true)',
     'state':
         'File for the device id and learned peers '
         '(default /var/lib/gundil-intercom/state.json)',

@@ -11,14 +11,17 @@
 ///
 /// Control messages carry UTF-8 JSON payloads; [MessageType.audio] carries raw
 /// signed 16-bit little-endian mono PCM at the sample rate announced in the
-/// preceding [MessageType.talkStart].
+/// [MessageType.open] that started the conversation.
 library;
 
 import 'dart:convert';
 import 'dart:typed_data';
 
 /// Protocol version, sent in [MessageType.hello] and discovery beacons.
-const int protocolVersion = 2;
+const int protocolVersion = 3;
+
+/// Oldest peer protocol we can hold a two-way conversation with.
+const int minConversationVersion = 3;
 
 /// Default TCP port each peer listens on.
 const int defaultTcpPort = 47801;
@@ -38,14 +41,20 @@ enum MessageType {
   /// `{"id","name","platform","port","v"}` - sent by both ends on connect.
   hello(0x01),
 
-  /// Push-to-talk pressed: `{"sampleRate": 16000, "group": bool}`.
-  talkStart(0x02),
+  /// Open a two-way audio line: `{"sampleRate": 16000, "group": bool}`.
+  open(0x02),
 
-  /// Push-to-talk released.
-  talkEnd(0x03),
+  /// Leave / hang up the line.
+  close(0x03),
 
-  /// Raw PCM16LE mono samples of an ongoing transmission.
+  /// Raw PCM16LE mono microphone samples (both directions while connected).
   audio(0x04),
+
+  /// The line was accepted (sent automatically when auto-answer is on).
+  accept(0x05),
+
+  /// The line was refused: `{"reason": "busy" | "declined" | "timeout"}`.
+  reject(0x06),
   ping(0x08),
   pong(0x09);
 

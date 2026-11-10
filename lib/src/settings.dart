@@ -68,6 +68,16 @@ class Settings {
       (_p.isEmpty ? _defaultName() : _p.substring(0, _p.length - 1));
   set name(String v) => _prefs.setString('${_p}name', v);
 
+  /// Accept incoming two-way connections without ringing.
+  bool get autoAnswer => _prefs.getBool('${_p}autoAnswer') ?? true;
+  set autoAnswer(bool v) => _prefs.setBool('${_p}autoAnswer', v);
+
+  /// Software echo suppression (default on, except Android which has a
+  /// hardware echo canceller).
+  bool get echoSuppression =>
+      _prefs.getBool('${_p}echoSuppression') ?? !Platform.isAndroid;
+  set echoSuppression(bool v) => _prefs.setBool('${_p}echoSuppression', v);
+
   /// Windows: minimize / close hide the window to the system tray.
   bool get minimizeToTray => _prefs.getBool('${_p}minimizeToTray') ?? true;
   set minimizeToTray(bool v) => _prefs.setBool('${_p}minimizeToTray', v);

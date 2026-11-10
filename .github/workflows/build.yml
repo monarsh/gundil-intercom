@@ -38,6 +38,25 @@ jobs:
           name: gundil-intercom-linux-x64
           path: gundil-intercom-linux-x64.tar.gz
 
+  linux-arm64:
+    # Desktop app for Raspberry Pi 4/5 (and other boards) with a 64-bit OS.
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+      - name: Install Flutter (git checkout; there is no arm64 archive)
+        run: |
+          git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter"
+          echo "$RUNNER_TEMP/flutter/bin" >> "$GITHUB_PATH"
+      - run: flutter --version
+      - run: flutter build linux --release
+      - run: tar -C build/linux/arm64/release -czf gundil-intercom-linux-arm64.tar.gz bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-linux-arm64
+          path: gundil-intercom-linux-arm64.tar.gz
+
   windows:
     needs: test
     runs-on: windows-latest

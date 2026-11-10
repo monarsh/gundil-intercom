@@ -1,9 +1,10 @@
 // Gundil Intercom headless node.
 //
 // Runs the intercom without a screen — e.g. on an Orange Pi PC / Raspberry Pi
-// with a microphone, a speaker on the audio jack and a push-to-talk button on
-// a GPIO pin. It finds the other intercoms on the LAN, plays incoming talk,
-// and transmits while the button is held.
+// with a microphone, a speaker on the audio jack and a button on a GPIO pin.
+// It finds the other intercoms on the LAN and holds two-way conversations:
+// incoming connections are answered automatically (like a door station), and
+// the button connects to the configured target or hangs up.
 //
 // Build (also cross-compiles, see tool/build_node.sh):
 //   dart compile exe bin/gundil_node.dart -o gundil-intercom-node
@@ -54,7 +55,12 @@ Future<void> main(List<String> args) async {
     name: name,
     audio: NativeAudioEngine(),
     preferredPort: cfg.integer('port') ?? defaultTcpPort,
-    rogerBeep: cfg.flag('roger-beep', fallback: true),
+    rogerBeep: cfg.flag(
+      'tones',
+      fallback: cfg.flag('roger-beep', fallback: true),
+    ),
+    autoAnswer: cfg.flag('auto-answer', fallback: true),
+    echoSuppression: cfg.flag('echo-suppression', fallback: true),
     savedPeers: saved,
     onSavedPeersChanged: (list) => state.save(saved: list),
   );
@@ -85,7 +91,7 @@ Future<void> main(List<String> args) async {
   final cleanups = <Future<void> Function()>[];
 
   // ------------------------------------------------------------- inputs
-  final pttGpio = cfg.integer('ptt-gpio');
+  final pttGpio = cfg.integer('button-gpio') ?? cfg.integer('ptt-gpio');
   final ledGpio = cfg.integer('led-gpio');
   if (pttGpio != null || ledGpio != null) {
     final backend = await detectGpioBackend(cfg.str('gpio-backend') ?? 'auto');
@@ -94,15 +100,18 @@ Future<void> main(List<String> args) async {
       try {
         final button = await GpioButton.open(
           line: pttGpio,
-          activeLow: cfg.flag('ptt-gpio-active-low', fallback: true),
+          activeLow: cfg.flag(
+            'button-gpio-active-low',
+            fallback: cfg.flag('ptt-gpio-active-low', fallback: true),
+          ),
           backend: backend,
           chip: chip,
         );
-        button.changes.listen(node.ptt);
+        button.changes.listen(node.button);
         cleanups.add(button.close);
-        log('Push-to-talk button on GPIO $pttGpio (${backend.name})');
+        log('Connect button on GPIO $pttGpio (${backend.name})');
       } catch (e) {
-        log('ERROR: push-to-talk GPIO $pttGpio: $e');
+        log('ERROR: button GPIO $pttGpio: $e');
       }
     }
     if (ledGpio != null) {
@@ -121,26 +130,27 @@ Future<void> main(List<String> args) async {
     }
   }
 
-  final pttInput = cfg.str('ptt-input');
+  final pttInput = cfg.str('button-input') ?? cfg.str('ptt-input');
   if (pttInput != null) {
-    final code = cfg.integer('ptt-key') ?? 57;
+    final code = cfg.integer('button-key') ?? cfg.integer('ptt-key') ?? 57;
     try {
       final key = InputKey.open(pttInput, code);
       key.changes.listen(
-        node.ptt,
+        node.button,
         onError: (Object e) => log('ERROR: $pttInput: $e'),
       );
       cleanups.add(key.close);
-      log('Push-to-talk key $code on $pttInput');
+      log('Connect key $code on $pttInput');
     } catch (e) {
-      log('ERROR: ptt-input $pttInput: $e');
+      log('ERROR: button-input $pttInput: $e');
     }
   }
 
   if (stdin.hasTerminal) {
     log(
-      'Keys: [Enter] start/stop talking · l = list peers · '
-      't <name|everyone> = talk to · q = quit',
+      'Keys: [Enter] connect / accept / hang up · a = accept · d = decline · '
+      'm = mute · l = list peers · t <name|everyone> = who to connect to · '
+      'q = quit',
     );
     stdin
         .transform(utf8.decoder)
@@ -154,7 +164,7 @@ Future<void> main(List<String> args) async {
     if (stopping) return;
     stopping = true;
     log('Stopping (${s.name})');
-    core.stopTalking();
+    core.hangUp();
     for (final c in cleanups) {
       try {
         await c();
@@ -178,9 +188,11 @@ class _Node {
   GpioOutput? led;
   void Function()? onQuit;
 
-  String? _lastTalker;
+  String _lastStatus = '';
   final Map<String, bool> _online = {};
-  bool? _ledOn;
+  Timer? _blink;
+  bool _ledState = false;
+  String _ledMode = 'off';
 
   void watch() {
     core.events.listen((e) => log(e.error ? 'ERROR: ${e.message}' : e.message));
@@ -188,15 +200,29 @@ class _Node {
   }
 
   void _onChange() {
-    final incoming = core.incoming;
-    final talker = incoming == null ? null : core.displayName(incoming.peerId);
-    if (talker != _lastTalker) {
-      if (talker != null) {
-        log('🔊 $talker is talking${incoming!.group ? ' to everyone' : ''}');
-      } else if (_lastTalker != null) {
-        log('   $_lastTalker finished');
+    final conv = core.conversation;
+    final String status;
+    if (conv == null) {
+      status = 'idle';
+    } else if (core.ringing && !core.autoAnswer) {
+      status =
+          '🔔 ${conv.ringing.map(core.displayName).join(', ')} wants to '
+          'talk (press the button or "a" to accept)';
+    } else if (conv.isConnected) {
+      status =
+          '📞 connected with ${conv.connected.map(core.displayName).join(', ')}';
+    } else if (conv.calling.isNotEmpty) {
+      status = '… calling ${conv.calling.map(core.displayName).join(', ')}';
+    } else {
+      status = _lastStatus; // answering: about to connect
+    }
+    if (status != _lastStatus) {
+      if (status == 'idle') {
+        if (_lastStatus.isNotEmpty) log('   line closed');
+      } else {
+        log(status);
       }
-      _lastTalker = talker;
+      _lastStatus = status;
     }
     for (final e in core.entries) {
       final was = _online[e.key];
@@ -210,27 +236,53 @@ class _Node {
         }
       }
     }
-    final ledOn = core.transmitting || incoming != null;
-    if (ledOn != _ledOn) {
-      _ledOn = ledOn;
-      led?.set(ledOn);
+    // LED: on while connected, blinking while calling / ringing.
+    _setLed(
+      conv == null
+          ? 'off'
+          : conv.isConnected
+          ? 'on'
+          : 'blink',
+    );
+  }
+
+  void _setLed(String mode) {
+    if (mode == _ledMode || led == null) return;
+    _ledMode = mode;
+    _blink?.cancel();
+    _blink = null;
+    switch (mode) {
+      case 'on':
+        led!.set(true);
+      case 'off':
+        led!.set(false);
+      case 'blink':
+        _blink = Timer.periodic(const Duration(milliseconds: 400), (_) {
+          _ledState = !_ledState;
+          led!.set(_ledState);
+        });
     }
   }
 
-  /// Push-to-talk pressed (true) / released (false).
-  void ptt(bool pressed) {
-    if (!pressed) {
-      if (core.pttHeld) {
-        core.stopTalking();
-        log('🎙 stopped talking');
-      }
-      return;
+  /// The button (GPIO, USB key) was pressed (true) or released (false).
+  /// Press: connect / accept / hang up. Release: nothing.
+  void button(bool pressed) {
+    if (pressed) toggle();
+  }
+
+  void toggle() {
+    final conv = core.conversation;
+    if (conv != null && core.ringing) {
+      core.accept();
+    } else if (conv != null) {
+      core.hangUp();
+    } else {
+      final t = _resolveTarget();
+      if (t == null) return;
+      core.selectTarget(t);
+      log('… connecting to ${core.targetName(t)}');
+      core.connect(t);
     }
-    final t = _resolveTarget();
-    if (t == null) return;
-    core.selectTarget(t);
-    log('🎙 talking to ${core.targetName(t)}');
-    core.startTalking();
   }
 
   TalkTarget? _resolveTarget() {
@@ -257,22 +309,32 @@ class _Node {
   void command(String line) {
     final cmd = line.trim();
     if (cmd.isEmpty) {
-      ptt(!core.pttHeld);
+      toggle();
     } else if (cmd == 'q' || cmd == 'quit') {
       onQuit?.call();
+    } else if (cmd == 'a') {
+      core.accept();
+    } else if (cmd == 'd') {
+      core.decline();
+    } else if (cmd == 'h') {
+      core.hangUp();
+    } else if (cmd == 'm') {
+      core.toggleMute();
+      log(core.muted ? '🔇 microphone muted' : '🎙 microphone on');
     } else if (cmd == 'l' || cmd == 'list') {
       final entries = core.entries;
       if (entries.isEmpty) log('No peers yet.');
       for (final e in entries) {
         log(
           '  ${e.online ? '●' : '○'} ${e.name}  ${e.host}:${e.port}  '
-          '${e.platform}${e.isSaved ? '  (saved)' : ''}',
+          '${e.platform}${e.isSaved ? '  (saved)' : ''}'
+          '${e.live?.outdated ?? false ? '  (needs update)' : ''}',
         );
       }
-      log('Talking to: $targetName');
+      log('Button connects to: $targetName');
     } else if (cmd.startsWith('t ')) {
       targetName = cmd.substring(2).trim();
-      log('Push-to-talk now talks to: $targetName');
+      log('The button now connects to: $targetName');
     } else {
       log('Unknown command "$cmd"');
     }
@@ -361,7 +423,7 @@ String _hostname() {
 
 void _printHelp() {
   stdout.writeln('''
-Gundil Intercom headless node — push-to-talk LAN intercom without a screen.
+Gundil Intercom headless node — two-way LAN intercom without a screen.
 
 Usage: gundil-intercom-node [--config=FILE] [--option=value ...]
 
@@ -374,6 +436,7 @@ default ${NodeConfig.defaultPath}):''');
   --config=FILE            Use another config file
   --help                   Show this help
 
-When run in a terminal: press Enter to start/stop talking, "l" to list peers,
-"t <name>" to choose who to talk to, "q" to quit.''');
+When run in a terminal: Enter = connect / accept / hang up, "a" accept,
+"d" decline, "m" mute, "l" list peers, "t <name>" choose who the button
+connects to, "q" quit.''');
 }

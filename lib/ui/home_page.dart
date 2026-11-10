@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../src/autostart.dart';
 import '../src/intercom_service.dart';
@@ -11,16 +10,16 @@ import '../src/settings.dart';
 import '../src/window_bridge.dart';
 import 'peer_dialog.dart';
 import 'peer_list.dart';
-import 'ptt_panel.dart';
+import 'intercom_panel.dart';
 
 /// Main window.
 ///
-/// * Wide screens (desktop, tablets): channel list on the left, big
-///   push-to-talk button on the right.
-/// * Narrow screens (phones): channel list on top, push-to-talk at the bottom.
+/// * Wide screens (desktop, tablets): peer list on the left, the connect /
+///   hang-up controls on the right.
+/// * Narrow screens (phones): peer list on top, controls at the bottom.
 ///
-/// Pick a channel (Everyone or one peer), then hold the button — or the Space
-/// bar on desktop — to talk.
+/// Pick Everyone or one peer and press CONNECT: a two-way audio line opens
+/// until either side hangs up.
 class HomePage extends StatefulWidget {
   const HomePage({super.key, required this.service, required this.settings});
 
@@ -71,26 +70,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Never leave the microphone open in the background.
-    if (state != AppLifecycleState.resumed) service.stopTalking();
+    // A two-way conversation deliberately continues in the background
+    // (tray on Windows, background mode on Android).
     // On Android the engine may keep running without a window (background
     // mode), so only desktop shuts down when the window goes away.
     if (state == AppLifecycleState.detached && !Platform.isAndroid) {
       service.shutdown();
     }
-  }
-
-  /// Space bar = push-to-talk on desktop.
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event.logicalKey != LogicalKeyboardKey.space) {
-      return KeyEventResult.ignored;
-    }
-    if (event is KeyDownEvent) {
-      service.startTalking();
-    } else if (event is KeyUpEvent) {
-      service.stopTalking();
-    }
-    return KeyEventResult.handled; // also swallows KeyRepeatEvent
   }
 
   // ---------------------------------------------------------------- dialogs
@@ -137,6 +123,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final autostartWas = await Autostart.isEnabled();
     var autostart = autostartWas;
     final trayWas = widget.settings.minimizeToTray;
+    var autoAnswer = service.autoAnswer;
+    var echo = service.echoSuppression;
     var tray = trayWas;
     final backgroundWas = await PlatformBridge.getBackground();
     var background = backgroundWas;
@@ -183,6 +171,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     onChanged: (v) => setLocal(() => autostart = v),
                   ),
                 ],
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Answer automatically'),
+                  subtitle: const Text(
+                    'Incoming connections open at once, like an intercom. '
+                    'Turn off to ring and accept/decline instead.',
+                  ),
+                  value: autoAnswer,
+                  onChanged: (v) => setLocal(() => autoAnswer = v),
+                ),
+                if (!Platform.isAndroid)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Echo suppression'),
+                    subtitle: const Text(
+                      'Lowers your mic while the other side talks, so they '
+                      "don't hear themselves. Turn off with a headset.",
+                    ),
+                    value: echo,
+                    onChanged: (v) => setLocal(() => echo = v),
+                  ),
                 if (WindowBridge.supported)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
@@ -246,6 +255,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (saved == true) {
+      service.autoAnswer = autoAnswer;
+      widget.settings.autoAnswer = autoAnswer;
+      service.echoSuppression = echo;
+      widget.settings.echoSuppression = echo;
       if (tray != trayWas) {
         widget.settings.minimizeToTray = tray;
         await WindowBridge.setTrayEnabled(tray);
@@ -334,7 +347,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       child: Focus(
         focusNode: _focus,
         autofocus: true,
-        onKeyEvent: _onKey,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= _wideBreakpoint;
@@ -383,7 +395,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
         const VerticalDivider(width: 1),
         Expanded(
-          child: Center(child: PttPanel(service: service)),
+          child: Center(child: IntercomPanel(service: service)),
         ),
       ],
     );
@@ -396,7 +408,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           child: PeerList(service: service, onAddPeer: _addPeerDialog),
         ),
         const Divider(height: 1),
-        SafeArea(top: false, child: PttPanel(service: service, compact: true)),
+        SafeArea(
+          top: false,
+          child: IntercomPanel(service: service, compact: true),
+        ),
       ],
     );
   }

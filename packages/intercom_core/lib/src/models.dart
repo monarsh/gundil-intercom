@@ -22,6 +22,12 @@ class Peer {
   /// Whether a live TCP connection to the peer currently exists.
   bool connected = false;
 
+  /// Protocol version the peer reported (0 = unknown yet).
+  int version = 0;
+
+  /// Too old for two-way audio (the user must update that device).
+  bool get outdated => version != 0 && version < 3;
+
   static const Duration beaconTimeout = Duration(seconds: 7);
 
   bool get online {
@@ -145,18 +151,47 @@ class PeerTarget extends TalkTarget {
   int get hashCode => peerId.hashCode;
 }
 
-/// A transmission we are currently receiving.
-class IncomingTalk {
-  IncomingTalk({
-    required this.peerId,
-    required this.sampleRate,
-    required this.group,
-  });
-  final String peerId;
-  final int sampleRate;
+/// State of one peer in the current conversation.
+enum MemberState {
+  /// We asked them to join; waiting for their answer.
+  calling,
 
-  /// Sent to everyone rather than just us.
+  /// They asked us; waiting for us to accept (auto-answer off).
+  ringing,
+
+  /// Two-way audio is flowing.
+  connected,
+}
+
+/// The current two-way audio line (one at a time).
+class Conversation {
+  Conversation({required this.group, required this.outgoing});
+
+  /// Started with "Everyone" (we are the hub and hear all members mixed).
   final bool group;
-  final DateTime startedAt = DateTime.now();
-  DateTime lastAudio = DateTime.now();
+
+  /// We started it.
+  final bool outgoing;
+
+  final Map<String, MemberState> members = {};
+
+  /// When the first member connected.
+  DateTime? connectedAt;
+
+  /// Last time anything was heard from each member (liveness).
+  final Map<String, DateTime> lastHeard = {};
+
+  final Map<String, DateTime> invitedAt = {};
+
+  Iterable<String> get connected => members.entries
+      .where((e) => e.value == MemberState.connected)
+      .map((e) => e.key);
+  Iterable<String> get ringing => members.entries
+      .where((e) => e.value == MemberState.ringing)
+      .map((e) => e.key);
+  Iterable<String> get calling => members.entries
+      .where((e) => e.value == MemberState.calling)
+      .map((e) => e.key);
+
+  bool get isConnected => connected.isNotEmpty;
 }

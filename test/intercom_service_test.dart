@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -18,6 +19,9 @@ Future<void> eventually(
 
 Int16List tone(int n, int value) => Int16List.fromList(List.filled(n, value));
 
+/// [n] samples of a constant value: easy to spot in what a peer played.
+Int16List voice(int n, int value) => tone(n, value);
+
 void main() {
   late IntercomService alice, bob, carol;
   late FakeAudioEngine aliceAudio, bobAudio, carolAudio;
@@ -30,6 +34,7 @@ void main() {
         preferredPort: 0, // any free port
         enableDiscovery: false,
         rogerBeep: false,
+        echoSuppression: false,
       );
 
   setUp(() async {
@@ -65,100 +70,134 @@ void main() {
     await eventually(() => bob.peer('carol-id')?.online ?? false);
   });
 
-  test('push-to-talk to one peer plays instantly, no answer needed', () async {
-    alice.selectTarget(const PeerTarget('bob-id'));
-    await alice.startTalking();
-    expect(alice.transmitting, isTrue);
-    expect(aliceAudio.capturing, isTrue);
+  test('connect opens two-way audio; the other side auto-answers', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => alice.inConversation && bob.inConversation);
+    expect(alice.memberState('bob-id'), MemberState.connected);
+    expect(bob.memberState('alice-id'), MemberState.connected);
+    expect(aliceAudio.capturing && aliceAudio.playing, isTrue);
+    expect(bobAudio.capturing && bobAudio.playing, isTrue);
 
-    await eventually(() => bob.incoming?.peerId == 'alice-id');
-    expect(bob.incoming!.group, isFalse);
-    expect(bobAudio.playing, isTrue);
-
-    final voice = Int16List.fromList(
-      List.generate(320, (i) => (i * 97) % 20000 - 10000),
-    );
-    aliceAudio.inject(voice);
-    await eventually(() => bobAudio.played.length >= 320);
-    expect(bobAudio.played.sublist(0, 320), voice);
-
-    // Carol was not addressed.
-    expect(carol.incoming, isNull);
-    expect(carolAudio.played, isEmpty);
-
-    alice.stopTalking();
-    expect(alice.transmitting, isFalse);
-    expect(aliceAudio.capturing, isFalse);
-    await eventually(() => bob.incoming == null);
-  });
-
-  test('Everyone channel reaches all online peers', () async {
-    alice.selectTarget(const EveryoneTarget());
-    await alice.startTalking();
+    // Both directions at the same time — no button to hold.
+    aliceAudio.inject(voice(1600, 11));
+    bobAudio.inject(voice(1600, 22));
     await eventually(
-      () => bob.incoming?.peerId == 'alice-id' && carol.incoming != null,
+      () => bobAudio.played.contains(11) && aliceAudio.played.contains(22),
     );
-    expect(bob.incoming!.group, isTrue);
-    aliceAudio.inject(tone(160, 42));
-    await eventually(
-      () => bobAudio.played.length >= 160 && carolAudio.played.length >= 160,
-    );
-    alice.stopTalking();
-    await eventually(() => bob.incoming == null && carol.incoming == null);
+    // Carol was not involved.
+    expect(carol.conversation, isNull);
+
+    alice.hangUp();
+    expect(alice.conversation, isNull);
+    await eventually(() => bob.conversation == null);
+    expect(aliceAudio.capturing || bobAudio.capturing, isFalse);
   });
 
-  test('switching channel while talking stops the transmission', () async {
-    alice.selectTarget(const PeerTarget('bob-id'));
-    await alice.startTalking();
-    await eventually(() => bob.incoming != null);
-    alice.selectTarget(const PeerTarget('carol-id'));
-    expect(alice.transmitting, isFalse);
-    await eventually(() => bob.incoming == null);
-
-    await alice.startTalking();
-    await eventually(() => carol.incoming?.peerId == 'alice-id');
-    expect(bob.incoming, isNull);
+  test('either side can hang up', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.inConversation);
+    bob.hangUp();
+    await eventually(() => alice.conversation == null);
   });
 
-  test('second talker is ignored while the channel is busy', () async {
-    alice.selectTarget(const PeerTarget('bob-id'));
-    carol.selectTarget(const PeerTarget('bob-id'));
-    await alice.startTalking();
-    await eventually(() => bob.incoming?.peerId == 'alice-id');
-
-    await carol.startTalking();
-    carolAudio.inject(tone(160, 7));
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-    expect(bob.incoming!.peerId, 'alice-id');
-    expect(bobAudio.played.contains(7), isFalse);
-
-    // Once Alice releases, Carol's next press gets through.
-    alice.stopTalking();
-    carol.stopTalking();
-    await eventually(() => bob.incoming == null);
-    await carol.startTalking();
-    await eventually(() => bob.incoming?.peerId == 'carol-id');
+  test('auto-answer off: rings until accepted', () async {
+    bob.autoAnswer = false;
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.ringing);
+    expect(alice.memberState('bob-id'), MemberState.calling);
+    expect(bobAudio.capturing, isFalse); // mic stays off while ringing
+    await bob.accept();
+    await eventually(() => alice.inConversation && bob.inConversation);
+    aliceAudio.inject(voice(1600, 5));
+    await eventually(() => bobAudio.played.contains(5));
   });
 
-  test('half-duplex: incoming audio is muted while we transmit', () async {
-    alice.selectTarget(const PeerTarget('bob-id'));
-    bob.selectTarget(const PeerTarget('alice-id'));
-    await alice.startTalking();
-    await eventually(() => bob.incoming != null);
-    await bob.startTalking();
-    aliceAudio.inject(tone(160, 5));
-    await Future<void>.delayed(const Duration(milliseconds: 150));
-    expect(bobAudio.played, isEmpty);
-  });
-
-  test('talking to an offline peer reports an error', () async {
+  test('auto-answer off: declining tells the caller', () async {
+    bob.autoAnswer = false;
     final events = <String>[];
     final sub = alice.events.listen((e) => events.add(e.message));
-    alice.selectTarget(const PeerTarget('bob-id'));
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.ringing);
+    bob.decline();
+    await eventually(() => alice.conversation == null);
+    await eventually(() => events.isNotEmpty);
+    expect(events.last, contains('declined'));
+    await sub.cancel();
+  });
+
+  test('a busy peer refuses a second caller', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.inConversation);
+    final events = <String>[];
+    final sub = carol.events.listen((e) => events.add(e.message));
+    await carol.connect(const PeerTarget('bob-id'));
+    await eventually(() => carol.conversation == null);
+    await eventually(() => events.isNotEmpty);
+    expect(events.last, contains('busy'));
+    expect(bob.memberState('alice-id'), MemberState.connected);
+    await sub.cancel();
+  });
+
+  test('calling each other at the same moment connects', () async {
+    await Future.wait([
+      alice.connect(const PeerTarget('bob-id')),
+      bob.connect(const PeerTarget('alice-id')),
+    ]);
+    await eventually(() => alice.inConversation && bob.inConversation);
+  });
+
+  test('Everyone: hub hears all members mixed, members hear the hub', () async {
+    await alice.connect(const EveryoneTarget());
+    await eventually(
+      () =>
+          alice.memberState('bob-id') == MemberState.connected &&
+          alice.memberState('carol-id') == MemberState.connected,
+    );
+    expect(alice.conversation!.group, isTrue);
+    // Feed all three microphones continuously, like live speech.
+    final feeder = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      bobAudio.inject(voice(320, 100));
+      carolAudio.inject(voice(320, 1000));
+      aliceAudio.inject(voice(320, 7));
+    });
+    addTearDown(feeder.cancel);
+    // Mixed: Alice hears Bob + Carol summed in the same samples.
+    await eventually(() => aliceAudio.played.contains(1100));
+    await eventually(
+      () => bobAudio.played.contains(7) && carolAudio.played.contains(7),
+    );
+    // Members only talk to the hub, not to each other.
+    expect(bob.memberState('carol-id'), isNull);
+  });
+
+  test('switching to another peer hangs up the first', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.inConversation);
+    await alice.connect(const PeerTarget('carol-id'));
+    await eventually(() => bob.conversation == null);
+    await eventually(() => carol.inConversation && alice.inConversation);
+    expect(alice.conversation!.members.keys, ['carol-id']);
+  });
+
+  test('mute stops sending the microphone', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.inConversation);
+    alice.toggleMute();
+    aliceAudio.inject(voice(1600, 9));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(bobAudio.played.contains(9), isFalse);
+    alice.toggleMute();
+    aliceAudio.inject(voice(1600, 9));
+    await eventually(() => bobAudio.played.contains(9));
+  });
+
+  test('connecting to an offline peer reports an error', () async {
+    final events = <String>[];
+    final sub = alice.events.listen((e) => events.add(e.message));
     await bob.shutdown();
     await eventually(() => !alice.peer('bob-id')!.online);
-    await alice.startTalking();
-    expect(alice.transmitting, isFalse);
+    await alice.connect(const PeerTarget('bob-id'));
+    expect(alice.conversation, isNull);
     await eventually(() => events.isNotEmpty);
     expect(events.single, contains('offline'));
     await sub.cancel();
@@ -166,14 +205,13 @@ void main() {
     await bob.start();
   });
 
-  test('receiver drops a talker that vanishes mid-transmission', () async {
-    alice.selectTarget(const PeerTarget('bob-id'));
-    await alice.startTalking();
-    await eventually(() => bob.incoming?.peerId == 'alice-id');
-    await alice.shutdown();
-    await eventually(() => bob.incoming == null);
-    alice = node('alice-id', 'Alice', aliceAudio);
-    await alice.start();
+  test('a member that vanishes is dropped', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => alice.inConversation);
+    await bob.shutdown();
+    await eventually(() => alice.conversation == null);
+    bob = node('bob-id', 'Bob', bobAudio);
+    await bob.start();
   });
 
   group('saved peers', () {
@@ -352,11 +390,16 @@ void main() {
     });
   });
 
-  test('rmsLevel and roger tone', () {
+  test('rmsLevel and tones', () {
     expect(IntercomCore.rmsLevel(Int16List(100)), 0);
     expect(IntercomCore.rmsLevel(tone(100, 32767)), closeTo(1, 0.01));
-    final beep = IntercomCore.rogerTone(16000);
-    expect(beep.length, 16000 * 140 ~/ 1000);
-    expect(beep.reduce((a, b) => a > b ? a : b), lessThanOrEqualTo(5000));
+    for (final t in [
+      IntercomCore.connectTone(16000),
+      IntercomCore.hangupTone(16000),
+      IntercomCore.ringTone(16000),
+    ]) {
+      expect(t, isNotEmpty);
+      expect(t.reduce((a, b) => a > b ? a : b), lessThanOrEqualTo(5000));
+    }
   });
 }

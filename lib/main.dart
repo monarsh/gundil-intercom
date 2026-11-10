@@ -12,6 +12,8 @@ Future<void> main() async {
     selfId: settings.deviceId,
     name: settings.name,
     audio: NativeAudioEngine(),
+    autoAnswer: settings.autoAnswer,
+    echoSuppression: settings.echoSuppression,
     savedPeers: settings.savedPeers,
     onSavedPeersChanged: (list) => settings.savedPeers = list,
   );
@@ -54,19 +56,21 @@ class IntercomApp extends StatelessWidget {
 void _keepTrayTooltipUpdated(IntercomService service) {
   String? last;
   void update() {
-    final incoming = service.incoming;
+    final conv = service.conversation;
     final online = service.onlinePeers.length;
     final String text;
-    if (incoming != null) {
-      text =
-          'Gundil Intercom — ${service.displayName(incoming.peerId)} '
-          'is talking';
-    } else if (service.transmitting) {
-      text =
-          'Gundil Intercom — talking to '
-          '${service.targetName(service.target)}';
-    } else {
+    if (conv == null) {
       text = 'Gundil Intercom — $online online';
+    } else if (service.ringing) {
+      text =
+          'Gundil Intercom — '
+          '${conv.ringing.map(service.displayName).join(', ')} wants to talk';
+    } else if (conv.isConnected) {
+      text =
+          'Gundil Intercom — connected with '
+          '${conv.connected.map(service.displayName).join(', ')}';
+    } else {
+      text = 'Gundil Intercom — connecting…';
     }
     if (text == last) return;
     last = text;

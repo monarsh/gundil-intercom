@@ -23,6 +23,14 @@ class PlatformBridge {
     }
   }
 
+  /// Puts Android audio into voice-communication mode (enables the phone's
+  /// echo canceller) and routes it to the loudspeaker or the earpiece.
+  static Future<void> startCallAudio({required bool speaker}) =>
+      _invoke('startCallAudio', {'speaker': speaker});
+  static Future<void> setSpeaker(bool speaker) =>
+      _invoke('setSpeaker', {'speaker': speaker});
+  static Future<void> stopCallAudio() => _invoke('stopCallAudio');
+
   /// Many Android devices drop broadcast/multicast packets unless a Wi-Fi
   /// multicast lock is held.
   static Future<void> acquireMulticastLock() => _invoke('acquireMulticastLock');
@@ -88,4 +96,14 @@ class FlutterPlatformHooks extends PlatformHooks {
 
   @override
   Future<void> releaseMulticastLock() => PlatformBridge.releaseMulticastLock();
+
+  @override
+  Future<void> startCallAudio({required bool speaker}) =>
+      PlatformBridge.startCallAudio(speaker: speaker);
+
+  @override
+  Future<void> setSpeaker(bool speaker) => PlatformBridge.setSpeaker(speaker);
+
+  @override
+  Future<void> stopCallAudio() => PlatformBridge.stopCallAudio();
 }

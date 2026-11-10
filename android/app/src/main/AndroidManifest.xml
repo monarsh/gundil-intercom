@@ -11,6 +11,9 @@
          awake while listening, start after boot, battery-optimization prompt -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Two-way call audio: voice mode, loudspeaker/earpiece routing -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -49,10 +52,10 @@
         <service
             android:name=".IntercomService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Always-on LAN push-to-talk intercom: keeps the network connection open so incoming voice messages from other intercoms are played immediately." />
+                android:value="Always-on LAN two-way intercom: keeps the network connection open so other intercoms on the local network can open a voice line to this device at any time." />
         </service>
         <receiver
             android:name=".BootReceiver"

@@ -33,7 +33,7 @@ void main() {
     test('decodes many frames from one chunk', () {
       final bytes = <int>[];
       for (var i = 0; i < 50; i++) {
-        bytes.addAll(Frame.json(MessageType.talkStart, {'n': 'm$i'}).encode());
+        bytes.addAll(Frame.json(MessageType.open, {'n': 'm$i'}).encode());
       }
       final out = FrameDecoder().add(bytes);
       expect(out.length, 50);

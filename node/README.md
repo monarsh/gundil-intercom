@@ -1,43 +1,50 @@
-# Gundil Intercom node: Orange Pi PC / single-board computers
+# Gundil Intercom node: Orange Pi PC, Raspberry Pi and other boards
 
 A headless (no screen) Gundil Intercom for small Linux boards. It joins the
-same network intercom as the phone and PC apps:
+same **two-way** intercom network as the Android, Windows and Linux apps:
 
-- appears in their lists automatically, and you can talk to it from them;
-- plays incoming talk on the **speaker/headphone jack**;
-- transmits from the **built-in microphone** while a **push-to-talk button**
-  on the GPIO header is held (or a USB key/foot pedal);
-- optional **LED** that lights while talking or receiving;
+- appears in their lists automatically;
+- **answers incoming connections at once** (door-station behaviour). Both
+  sides then talk and listen at the same time until one hangs up;
+- a **button** on the GPIO header (or a USB key/foot pedal) connects to a
+  chosen intercom or to everyone, and hangs up;
+- optional **LED**: on while connected, blinking while calling or ringing;
+- software **echo suppression**, so the other side doesn't hear itself from
+  this board's speaker;
 - starts automatically on boot.
 
-Tested target: **Orange Pi PC** (Allwinner H3, 32-bit ARM) with Armbian
-Bookworm or Jammy. Other H3/H2+/H5 Orange Pis and Raspberry Pis work the
-same way; pick the matching download:
+| Board | Microphone | Speaker | Download |
+|---|---|---|---|
+| **Orange Pi PC** / PC Plus / One / Lite / Zero (H3, H2+) | built-in mic | 3.5 mm jack | `gundil-intercom-node-linux-arm.tar.gz` |
+| **Raspberry Pi 3/4**, 32-bit Raspberry Pi OS | USB mic or USB sound card | 3.5 mm jack or USB | `gundil-intercom-node-linux-arm.tar.gz` |
+| **Raspberry Pi 3/4/5**, 64-bit Raspberry Pi OS | USB mic or USB sound card | jack (3/4), USB, HDMI | `gundil-intercom-node-linux-arm64.tar.gz` |
+| Orange Pi PC 2 / Zero 2 / 3 / 4 / 5 (64-bit) | board or USB | board or USB | `gundil-intercom-node-linux-arm64.tar.gz` |
 
-| Board | Download |
-|---|---|
-| Orange Pi PC / PC Plus / One / Lite / Zero (H3, H2+), Raspberry Pi 2/3 with 32-bit OS | `gundil-intercom-node-linux-arm.tar.gz` |
-| Orange Pi PC 2, Zero 2, 3, 4, 5; Raspberry Pi 3/4/5 with 64-bit OS | `gundil-intercom-node-linux-arm64.tar.gz` |
+A USB speakerphone (mic + speaker in one, with built-in echo cancelling) is
+the easiest choice for a Raspberry Pi. On a Raspberry Pi 4/5 with the 64-bit
+desktop you can also run the full app with a window
+(`gundil-intercom-linux-arm64.tar.gz`). The node is for boards without a screen.
 
-(The desktop app with a window needs a 64-bit board. The Orange Pi PC is
-32-bit, so it runs this headless node instead.)
+Not sure which download? Run `uname -m`: `armv7l` → `-arm`, `aarch64` → `-arm64`.
 
 ## Install
 
-On the Orange Pi (SSH in, or use a keyboard and screen once):
+On the board (SSH in, or use a keyboard and screen once):
 
 ```bash
-tar xzf gundil-intercom-node-linux-arm.tar.gz
+tar xzf gundil-intercom-node-linux-arm.tar.gz     # or -arm64
 cd gundil-intercom-node-linux-arm
 sudo ./install.sh
 ```
 
 The installer:
 
-1. copies the program to `/opt/gundil-intercom`;
-2. creates `/etc/gundil-intercom/node.conf`;
-3. sets the mixer levels of the on-board audio (jack + built-in mic);
-4. installs and starts the `gundil-intercom-node` service, which starts on
+1. installs `alsa-utils` and `gpiod`;
+2. copies the program to `/opt/gundil-intercom`;
+3. creates `/etc/gundil-intercom/node.conf`;
+4. sets up audio. It picks the speaker card and the mic card (they can
+   differ, for example Pi headphone jack + USB mic) and sets mixer levels;
+5. installs and starts the `gundil-intercom-node` service, which starts on
    every boot.
 
 Check it:
@@ -47,10 +54,12 @@ journalctl -u gundil-intercom-node -f
 ```
 
 You should see `Gundil Intercom node "orangepipc" listening ...` and the
-other intercoms coming online. On your phone or PC the Orange Pi shows up in
-the peer list. Hold push-to-talk there and you hear it from the speaker jack.
+other intercoms coming online. On your phone or PC, select the board and
+press **Connect**: the board answers, and you hear each other both ways.
 
-## Wiring the button and LED (Orange Pi PC)
+## Wiring
+
+### Orange Pi PC
 
 ```
   40-pin header (pin 1 is next to the SD card / marked with a triangle)
@@ -58,7 +67,7 @@ the peer list. Hold push-to-talk there and you hear it from the speaker jack.
    3.3V  (1) (2)  5V
    PA12  (3) (4)  5V
    PA11  (5) (6)  GND
-   PA6   (7) (8)  PA13       <- pin 7 = push-to-talk button (GPIO 6)
+   PA6   (7) (8)  PA13       <- pin 7 = button (GPIO 6)
    GND   (9) (10) PA14       <- pin 9 = GND for button and LED
    PA1  (11) (12) PD14       <- pin 11 = LED via 330 Ω resistor (GPIO 1)
    PA0  (13) (14) GND
@@ -66,16 +75,13 @@ the peer list. Hold push-to-talk there and you hear it from the speaker jack.
    ...
 ```
 
-- **Button**: one leg to **pin 7**, the other to **pin 9 (GND)**.
-  `ptt-gpio = 6`, `ptt-gpio-active-low = true` (the defaults in
-  `node.conf`). With the `gpiod` tools installed (the installer does this),
-  the internal pull-up resistor is switched on, so no other parts are needed.
-  Without them (sysfs mode), add a 10 kΩ resistor from pin 7 to pin 1 (3.3 V).
-- **LED** (optional): **pin 11 → 330 Ω → LED anode (+)**, LED cathode (−) →
-  **GND** (pin 9 or 14). Set `led-gpio = 1`.
+- **Button**: between **pin 7** and **pin 9 (GND)**. Settings:
+  `button-gpio = 6`, `button-gpio-active-low = true`.
+- **LED** (optional): **pin 11 → 330 Ω → LED (+)**, LED (−) → **GND**.
+  Setting: `led-gpio = 1`.
 
 GPIO numbers on Allwinner chips are `port × 32 + pin` (PA = 0, PC = 2,
-PD = 3, PG = 6). Some other free pins on the Orange Pi PC:
+PD = 3, PG = 6). Other free pins on the Orange Pi PC:
 
 | Physical pin | Pin name | GPIO number |
 |---|---|---|
@@ -95,6 +101,24 @@ PD = 3, PG = 6). Some other free pins on the Orange Pi PC:
 Check your board's pinout before wiring, because layouts differ between
 models. `gpio readall` (WiringOP) prints the table for the board you have.
 
+### Raspberry Pi (all models with the 40-pin header)
+
+Use **BCM** GPIO numbers:
+
+- **Button**: between **physical pin 11 (GPIO 17)** and **pin 9 (GND)**.
+  Settings: `button-gpio = 17`, `button-gpio-active-low = true`.
+- **LED** (optional): **physical pin 13 (GPIO 27) → 330 Ω → LED (+)**,
+  LED (−) → **GND** (pin 14). Setting: `led-gpio = 27`.
+- Keep `gpio-backend = auto` (uses the `gpiod` tools installed by
+  `install.sh`). On current Raspberry Pi OS, `/sys/class/gpio` numbers are
+  offset (GPIO 17 = 529), so the gpiod backend is the reliable choice. On a
+  **Raspberry Pi 5** with an older kernel, set `gpio-chip = gpiochip4` if the
+  button does nothing.
+
+With the gpiod tools the internal pull-up resistor is switched on, so the
+button needs no other parts. In sysfs mode (`gpio-backend = sysfs`), add a
+10 kΩ resistor from the button pin to 3.3 V.
+
 ## Settings
 
 Edit `/etc/gundil-intercom/node.conf`, then
@@ -103,29 +127,36 @@ Edit `/etc/gundil-intercom/node.conf`, then
 | Setting | Meaning |
 |---|---|
 | `name` | Name shown on the other intercoms |
-| `target` | `everyone`, or the name of one intercom the button talks to |
-| `ptt-gpio`, `ptt-gpio-active-low` | Push-to-talk button pin |
-| `led-gpio` | Optional activity LED pin |
-| `gpio-backend` | `auto`, `gpiod` or `sysfs` |
-| `ptt-input`, `ptt-key` | Use a USB keyboard/foot pedal key instead of (or as well as) GPIO |
+| `auto-answer` | `true` (default): open incoming connections at once. `false`: ring until the button is pressed |
+| `target` | `everyone`, or the name of the intercom the button connects to |
+| `button-gpio`, `button-gpio-active-low` | Button pin (press = connect / accept / hang up) |
+| `led-gpio` | Optional LED pin |
+| `echo-suppression` | Lower the mic while the other side talks (default `true`). Turn off with a headset or an echo-cancelling USB speakerphone |
+| `gpio-backend`, `gpio-chip` | `auto` / `gpiod` / `sysfs`, and the gpiochip for gpiod |
+| `button-input`, `button-key` | Use a USB keyboard/foot pedal key as the button |
 | `peers` | Intercoms to add by IP if discovery doesn't reach them |
-| `roger-beep` | Beep when the other side lets go |
+| `tones` | Connect / hang-up / ring tones |
 
+Settings from earlier versions (`ptt-gpio`, `ptt-input`, ...) still work.
 Run `/opt/gundil-intercom/gundil-intercom-node --help` for all options.
 
 ## Audio troubleshooting
 
-- **Re-run the audio setup and test it**: `sudo /opt/gundil-intercom/setup-audio.sh --test`
-  records 3 s from the built-in mic and plays it back on the jack.
-- **Too quiet or too loud**: `alsamixer` → F6 to pick the *H3 Audio Codec*
-  card, adjust *Line Out* / *DAC* (playback) and, under F4, *Mic1* /
-  *Mic1 Boost* / *ADC Gain* (capture). Then run `sudo alsactl store`.
-- **No sound at all**: list the cards with `aplay -l` and `arecord -l`. If the
-  analog codec is not card 0, `setup-audio.sh` writes `/etc/asound.conf` to
-  make it the default.
-- The node has no echo cancellation. Keep the speaker away from the
-  built-in mic. This is less of a problem than on a phone, because a
-  walkie-talkie never plays and records at the same time.
+- **Re-run the audio setup and test it**:
+  `sudo /opt/gundil-intercom/setup-audio.sh --test` records 3 s from the mic
+  and plays it back on the speaker.
+- **Wrong card picked**: `aplay -l` and `arecord -l` list the cards. Then
+  choose them yourself, for example
+  `sudo /opt/gundil-intercom/setup-audio.sh --playback 1 --capture 2`.
+- **Too quiet or too loud**: `alsamixer` → F6 to pick the card, adjust the
+  playback level, and under F4 the capture (mic) level. Then run
+  `sudo alsactl store`. On the Orange Pi PC the controls are *Line Out* /
+  *DAC* and *Mic1* / *Mic1 Boost* / *ADC Gain*.
+- **The other side hears an echo**: move the speaker away from the mic, lower
+  the speaker volume, or use a USB speakerphone with built-in echo
+  cancellation (then set `echo-suppression = false`).
+- **Raspberry Pi OS with desktop** runs PipeWire. Pick the speaker and mic in
+  the desktop's sound settings instead of `setup-audio.sh`.
 
 ## Try it by hand (without the service)
 
@@ -134,8 +165,16 @@ sudo systemctl stop gundil-intercom-node
 sudo /opt/gundil-intercom/gundil-intercom-node --config=/etc/gundil-intercom/node.conf
 ```
 
-In the terminal, press **Enter** to start or stop talking. `l` lists the
-intercoms, `t Office-PC` chooses who to talk to, and `q` quits.
+In the terminal:
+
+| Key | Action |
+|---|---|
+| **Enter** | Connect / accept / hang up (same as the button) |
+| `a` / `d` | Accept / decline a ringing call |
+| `m` | Mute / unmute the microphone |
+| `l` | List intercoms |
+| `t Office-PC` | Choose who the button connects to |
+| `q` | Quit |
 
 ## Uninstall
 

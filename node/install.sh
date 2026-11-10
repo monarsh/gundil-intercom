@@ -21,6 +21,12 @@ mkdir -p /etc/gundil-intercom
 if [ ! -f /etc/gundil-intercom/node.conf ]; then
   install -m 644 "$HERE/node.conf.example" /etc/gundil-intercom/node.conf
   sed -i "s/^name = Gate$/name = $(hostname)/" /etc/gundil-intercom/node.conf
+  if grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null; then
+    # Raspberry Pi: button on GPIO 17 (pin 11), LED on GPIO 27 (pin 13).
+    sed -i 's/^button-gpio = 6$/button-gpio = 17/; s/^#led-gpio = 1$/#led-gpio = 27/' \
+      /etc/gundil-intercom/node.conf
+    echo "==> Raspberry Pi detected: button on GPIO 17 (pin 11)"
+  fi
   echo "==> Created /etc/gundil-intercom/node.conf (edit it to taste)"
 else
   echo "==> Keeping existing /etc/gundil-intercom/node.conf"

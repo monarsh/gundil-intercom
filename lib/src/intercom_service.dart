@@ -17,6 +17,8 @@ class IntercomService extends IntercomCore with ChangeNotifier {
     super.discoveryUdpPort,
     super.sampleRate,
     super.rogerBeep,
+    super.autoAnswer,
+    super.echoSuppression,
     super.savedPeers,
     super.onSavedPeersChanged,
     super.reconnectInterval,

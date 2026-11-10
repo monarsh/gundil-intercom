@@ -6,6 +6,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -66,8 +68,14 @@ class GundilApp : Application() {
         return engine
     }
 
-    fun startBackgroundService() {
+    /**
+     * Starts (or upgrades) the background service. [withMic] adds the
+     * microphone service type so a connection answered in the background can
+     * use the mic; Android only allows that while the app is visible.
+     */
+    fun startBackgroundService(withMic: Boolean = false) {
         val intent = Intent(this, IntercomService::class.java)
+            .putExtra(IntercomService.EXTRA_WITH_MIC, withMic)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
         } else {
@@ -91,13 +99,23 @@ class GundilApp : Application() {
                         } else {
                             result.success(true)
                         }
+                    "startCallAudio" -> {
+                        startCallAudio(call.argument<Boolean>("speaker") ?: true)
+                        result.success(null)
+                    }
+                    "setSpeaker" -> {
+                        setSpeaker(call.argument<Boolean>("speaker") ?: true)
+                        result.success(null)
+                    }
+                    "stopCallAudio" -> { stopCallAudio(); result.success(null) }
                     "acquireMulticastLock" -> { acquireMulticastLock(); result.success(null) }
                     "releaseMulticastLock" -> { releaseMulticastLock(); result.success(null) }
                     "getBackground" -> result.success(backgroundEnabled)
                     "setBackground" -> {
                         val on = call.argument<Boolean>("enabled") ?: false
                         prefs(this).edit().putBoolean(PREF_BACKGROUND, on).apply()
-                        if (on) startBackgroundService() else stopBackgroundService()
+                        if (on) startBackgroundService(withMic = activity != null)
+                        else stopBackgroundService()
                         result.success(on)
                     }
                     "getStartOnBoot" -> result.success(prefs(this).getBoolean(PREF_BOOT, false))
@@ -128,6 +146,46 @@ class GundilApp : Application() {
             return
         }
         a.requestPermissionFor(permission) { granted -> result.success(granted) }
+    }
+
+    // ----------------------------------------------------------- call audio
+
+    private val audioManager: AudioManager
+        get() = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+    /** Two-way audio: voice-communication mode (hardware echo canceller). */
+    private fun startCallAudio(speaker: Boolean) {
+        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+        setSpeaker(speaker)
+        activity?.setKeepScreenOn(true)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun setSpeaker(speaker: Boolean) {
+        val am = audioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (speaker) {
+                am.availableCommunicationDevices
+                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    ?.let { am.setCommunicationDevice(it) }
+            } else {
+                am.clearCommunicationDevice()
+            }
+        } else {
+            am.isSpeakerphoneOn = speaker
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopCallAudio() {
+        val am = audioManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            am.clearCommunicationDevice()
+        } else {
+            am.isSpeakerphoneOn = false
+        }
+        am.mode = AudioManager.MODE_NORMAL
+        activity?.setKeepScreenOn(false)
     }
 
     // ------------------------------------------------------------ discovery
