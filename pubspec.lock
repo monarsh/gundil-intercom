@@ -133,7 +133,7 @@ packages:
       path: "packages/intercom_core"
       relative: true
     source: path
-    version: "1.0.1"
+    version: "1.0.2"
   jni:
     dependency: transitive
     description:
