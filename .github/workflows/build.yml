@@ -37,6 +37,11 @@ jobs:
         with:
           name: gundil-intercom-linux-x64
           path: gundil-intercom-linux-x64.tar.gz
+      - run: tool/build_appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-appimage-x86_64
+          path: build/GundilIntercom-*-x86_64.AppImage
 
   linux-arm64:
     # Desktop app for Raspberry Pi 4/5 (and other boards) with a 64-bit OS.
@@ -56,6 +61,11 @@ jobs:
         with:
           name: gundil-intercom-linux-arm64
           path: gundil-intercom-linux-arm64.tar.gz
+      - run: tool/build_appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-appimage-aarch64
+          path: build/GundilIntercom-*-aarch64.AppImage
 
   windows:
     needs: test

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Gundil Intercom
+GenericName=LAN Intercom
+Comment=Two-way peer-to-peer audio intercom for your local network
+Exec=gundil_intercom %U
+Icon=gundil-intercom
+Terminal=false
+Categories=Network;Telephony;
+Keywords=intercom;voice;talk;LAN;
+StartupWMClass=com.p2pintercom.p2p_intercom

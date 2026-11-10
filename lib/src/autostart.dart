@@ -31,7 +31,9 @@ class Autostart {
 
   /// Turns autostart on or off. Returns the resulting state.
   static Future<bool> setEnabled(bool enabled) async {
-    final exe = Platform.resolvedExecutable;
+    // Inside an AppImage the executable lives in a temporary mount that
+    // changes every launch; $APPIMAGE is the real file to start.
+    final exe = Platform.environment['APPIMAGE'] ?? Platform.resolvedExecutable;
     try {
       if (Platform.isWindows) {
         final args = enabled

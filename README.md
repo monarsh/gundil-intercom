@@ -132,6 +132,21 @@ flutter build linux --release
 ./build/linux/x64/release/bundle/gundil_intercom
 ```
 
+**Linux AppImage** (one file that runs on most distributions, x86_64 or
+aarch64/Raspberry Pi 4–5):
+
+```bash
+flutter build linux --release
+tool/build_appimage.sh        # -> build/GundilIntercom-1.0.0-x86_64.AppImage
+```
+
+To run it: `chmod +x GundilIntercom-*.AppImage && ./GundilIntercom-*.AppImage`.
+It uses the system's GTK 3 and sound system (PipeWire, PulseAudio or ALSA),
+which every desktop distribution has. On distributions without FUSE 2
+(e.g. Ubuntu 22.04+), install `libfuse2` (`libfuse2t64` on 24.04), or run it
+with `--appimage-extract-and-run`. *Settings → Start automatically at login*
+works from the AppImage too.
+
 **Windows** (needs Visual Studio 2022 with "Desktop development with C++"):
 
 ```powershell
@@ -160,8 +175,8 @@ adb install build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
 Every push runs `.github/workflows/build.yml`, which tests the code and uploads
-these artifacts: a Linux x64 tarball, a Linux **arm64** tarball (Raspberry Pi
-4/5 desktop app), the Windows installer (`gundil-intercom-windows-setup`), a
+these artifacts: Linux **AppImages** for x86_64 and aarch64 (Raspberry Pi
+4/5), Linux x64 and arm64 tarballs, the Windows installer (`gundil-intercom-windows-setup`), a
 portable Windows folder, Android APKs, and the headless node for 32-bit and
 64-bit ARM boards.
 
