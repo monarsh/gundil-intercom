@@ -11,7 +11,8 @@
 ///
 /// Control messages carry UTF-8 JSON payloads; [MessageType.audio] carries raw
 /// signed 16-bit little-endian mono PCM at the sample rate announced in the
-/// [MessageType.open] that started the conversation.
+/// [MessageType.open] that started the conversation. [MessageType.video]
+/// carries one JPEG camera picture (see [VideoFrame]).
 library;
 
 import 'dart:convert';
@@ -56,7 +57,18 @@ enum MessageType {
   /// The line was refused: `{"reason": "busy" | "declined" | "timeout"}`.
   reject(0x06),
   ping(0x08),
-  pong(0x09);
+  pong(0x09),
+
+  /// One camera picture: `[rotation:1][JPEG]`, where `rotation` is the number
+  /// of clockwise quarter turns needed to show it upright. A payload of just
+  /// the rotation byte means "camera turned off". Only sent to peers whose
+  /// HELLO says `"video": true`; older peers skip unknown frame types anyway.
+  video(0x0A),
+
+  /// Acknowledges one [video] frame. The sender keeps only a couple of
+  /// pictures in flight per peer, so video never piles up in the TCP buffer
+  /// and delays the audio.
+  videoAck(0x0B);
 
   const MessageType(this.code);
   final int code;
@@ -163,4 +175,38 @@ Int16List bytesToPcm(Uint8List bytes) {
     out[i] = view.getInt16(i * 2, Endian.little);
   }
   return out;
+}
+
+/// One received camera picture.
+class VideoFrame {
+  VideoFrame(this.jpeg, {this.rotation = 0, DateTime? receivedAt})
+    : receivedAt = receivedAt ?? DateTime.now();
+
+  /// JPEG-encoded picture.
+  final Uint8List jpeg;
+
+  /// Clockwise quarter turns (0..3) needed to show the picture upright.
+  final int rotation;
+
+  final DateTime receivedAt;
+
+  /// Wire payload of a [MessageType.video] frame for [jpeg].
+  static Uint8List encode(Uint8List jpeg, {int rotation = 0}) {
+    final out = Uint8List(1 + jpeg.length);
+    out[0] = rotation & 3;
+    out.setRange(1, out.length, jpeg);
+    return out;
+  }
+
+  /// Wire payload meaning "my camera is off".
+  static Uint8List encodeOff() => Uint8List(1);
+
+  /// Parses a [MessageType.video] payload; null means the camera is off.
+  static VideoFrame? decode(Uint8List payload) {
+    if (payload.length < 2) return null;
+    return VideoFrame(
+      Uint8List.sublistView(payload, 1),
+      rotation: payload[0] & 3,
+    );
+  }
 }

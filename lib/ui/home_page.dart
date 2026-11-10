@@ -7,10 +7,12 @@ import '../src/autostart.dart';
 import '../src/intercom_service.dart';
 import '../src/platform_bridge.dart';
 import '../src/settings.dart';
+import '../src/video_call.dart';
 import '../src/window_bridge.dart';
+import 'intercom_panel.dart';
 import 'peer_dialog.dart';
 import 'peer_list.dart';
-import 'intercom_panel.dart';
+import 'video_view.dart';
 
 /// Main window.
 ///
@@ -40,29 +42,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   IntercomService get service => widget.service;
 
+  late final VideoCall _video = VideoCall(service)
+    ..onError = (m) => _showMessage(m, error: true);
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _eventSub = service.events.listen((e) {
-      if (!mounted) return;
-      _messenger.currentState
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(e.message),
-            duration: const Duration(seconds: 2),
-            backgroundColor: e.error
-                ? Theme.of(context).colorScheme.error
-                : null,
-          ),
-        );
-    });
+    _eventSub = service.events.listen(
+      (e) => _showMessage(e.message, error: e.error),
+    );
+  }
+
+  void _showMessage(String message, {bool error = false}) {
+    if (!mounted) return;
+    _messenger.currentState
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+          backgroundColor: error ? Theme.of(context).colorScheme.error : null,
+        ),
+      );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _video.dispose();
     _eventSub.cancel();
     _focus.dispose();
     super.dispose();
@@ -386,6 +394,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  /// Video takes the main area while anyone's camera is on.
+  bool get _showVideo => service.videoPeers.isNotEmpty || _video.on;
+
   Widget _wideBody() {
     return Row(
       children: [
@@ -395,24 +406,60 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         ),
         const VerticalDivider(width: 1),
         Expanded(
-          child: Center(child: IntercomPanel(service: service)),
+          child: ListenableBuilder(
+            listenable: Listenable.merge([service, _video]),
+            builder: (context, _) {
+              final panel = IntercomPanel(
+                service: service,
+                video: _video,
+                onMessage: _showMessage,
+                showParticipants: !_showVideo,
+              );
+              if (!_showVideo) return Center(child: panel);
+              return Column(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                      child: VideoStage(service: service, video: _video),
+                    ),
+                  ),
+                  panel,
+                ],
+              );
+            },
+          ),
         ),
       ],
     );
   }
 
   Widget _narrowBody() {
-    return Column(
-      children: [
-        Expanded(
-          child: PeerList(service: service, onAddPeer: _addPeerDialog),
-        ),
-        const Divider(height: 1),
-        SafeArea(
-          top: false,
-          child: IntercomPanel(service: service, compact: true),
-        ),
-      ],
+    return ListenableBuilder(
+      listenable: Listenable.merge([service, _video]),
+      builder: (context, _) => Column(
+        children: [
+          Expanded(
+            child: _showVideo
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                    child: VideoStage(service: service, video: _video),
+                  )
+                : PeerList(service: service, onAddPeer: _addPeerDialog),
+          ),
+          if (!_showVideo) const Divider(height: 1),
+          SafeArea(
+            top: false,
+            child: IntercomPanel(
+              service: service,
+              video: _video,
+              onMessage: _showMessage,
+              compact: true,
+              showParticipants: !_showVideo,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -35,6 +35,8 @@ void main() {
         enableDiscovery: false,
         rogerBeep: false,
         echoSuppression: false,
+        // Carol stands in for the headless node, which shows no video.
+        videoReceive: id != 'carol-id',
       );
 
   setUp(() async {
@@ -243,6 +245,72 @@ void main() {
     alice.toggleMute();
     aliceAudio.inject(voice(1600, 9));
     await eventually(() => bobAudio.played.contains(9));
+  });
+
+  group('camera video', () {
+    final jpeg = Uint8List.fromList([0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]);
+
+    test('only during a call; the peer sees the picture', () async {
+      alice.setCamera(true);
+      expect(alice.cameraOn, isFalse, reason: 'no call yet');
+      expect(alice.sendVideoFrame(jpeg), 0);
+
+      await alice.connect(const PeerTarget('bob-id'));
+      await eventually(() => alice.inConversation && bob.inConversation);
+      expect(alice.peer('bob-id')!.video, isTrue);
+      alice.setCamera(true);
+      expect(alice.cameraOn, isTrue);
+      expect(alice.sendVideoFrame(jpeg, rotation: 3), 1);
+      await eventually(() => bob.remoteVideo('alice-id') != null);
+      expect(bob.remoteVideo('alice-id')!.jpeg, jpeg);
+      expect(bob.remoteVideo('alice-id')!.rotation, 3);
+      expect(bob.videoPeers, ['alice-id']);
+      expect(bob.videoTick.value, greaterThan(0));
+    });
+
+    test('turning the camera off clears the picture at once', () async {
+      await alice.connect(const PeerTarget('bob-id'));
+      await eventually(() => alice.inConversation && bob.inConversation);
+      alice.setCamera(true);
+      alice.sendVideoFrame(jpeg);
+      await eventually(() => bob.remoteVideo('alice-id') != null);
+      alice.setCamera(false);
+      await eventually(() => bob.remoteVideo('alice-id') == null);
+      expect(alice.sendVideoFrame(jpeg), 0);
+    });
+
+    test('flow control: at most a few unacknowledged pictures', () async {
+      await alice.connect(const PeerTarget('bob-id'));
+      await eventually(() => alice.inConversation && bob.inConversation);
+      alice.setCamera(true);
+      var sent = 0;
+      for (var i = 0; i < 10; i++) {
+        sent += alice.sendVideoFrame(jpeg);
+      }
+      expect(sent, IntercomCore.maxVideoInFlight);
+      // Acks arrive: sending resumes.
+      await eventually(() => alice.sendVideoFrame(jpeg) == 1);
+    });
+
+    test('hanging up turns the camera off on both sides', () async {
+      await alice.connect(const PeerTarget('bob-id'));
+      await eventually(() => alice.inConversation && bob.inConversation);
+      bob.setCamera(true);
+      bob.sendVideoFrame(jpeg);
+      await eventually(() => alice.remoteVideo('bob-id') != null);
+      bob.hangUp();
+      expect(bob.cameraOn, isFalse);
+      await eventually(() => !alice.inConversation);
+      expect(alice.remoteVideo('bob-id'), isNull);
+    });
+
+    test('peers that cannot show video are not sent any', () async {
+      await alice.connect(const PeerTarget('carol-id'));
+      await eventually(() => alice.inConversation && carol.inConversation);
+      expect(alice.peer('carol-id')!.video, isFalse);
+      alice.setCamera(true);
+      expect(alice.sendVideoFrame(jpeg), 0);
+    });
   });
 
   test('connecting to an offline peer reports an error', () async {

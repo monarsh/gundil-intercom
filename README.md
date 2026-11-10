@@ -4,8 +4,8 @@ A serverless, peer-to-peer **two-way audio intercom over TCP/IP** for
 **Android, Windows, Linux, Orange Pi PC and Raspberry Pi**. Pick who to talk
 to and press **Connect**: both sides talk and listen at the same time, like a
 phone call, until one of you hangs up. Intercoms answer automatically, like a
-door station; you can turn that off to ring and accept instead. It's audio
-only.
+door station; you can turn that off to ring and accept instead. During a
+call, Android and Windows can also turn on their **camera** for video.
 
 ![Desktop app connected to the "Gate" intercom while Gate is speaking](docs/screenshot.png)
 
@@ -37,6 +37,16 @@ only.
   the tray tooltip names who's speaking. On Android, the background-mode
   notification shows "*Connected with Gate*" or "*Gate wants to talk*". The
   Orange Pi / Raspberry Pi node logs "*🔊 Gate is speaking*".
+- **Video calls (Android and Windows)**: during a call, press **Camera on**
+  to send your camera. It never turns on by itself: every call starts with
+  the camera off. On Android, the **switch** button flips between the front
+  and back camera. On Windows, the camera menu lists the built-in webcam and
+  any USB webcam, so you can choose one. The other side sees your video
+  (the Linux and Raspberry Pi desktop apps show video too; the headless node
+  ignores it). With *Everyone* it works like the audio: the caller sees
+  every member, and the members see the caller. Your own picture shows as a small self-view. Video
+  adapts to the network: pictures are dropped rather than delaying the
+  audio. On Android the camera pauses while the app is in the background.
 - **Mute** and a call timer.
 - **Android audio output picker**: during a call, tap the output button to
   switch between **Speaker**, **Phone (earpiece)**, a **Bluetooth headset**
@@ -115,13 +125,15 @@ tool/build_node.sh arm      # or arm64 / x64  -> build/node/*.tar.gz
 
 | Code | Type | Payload |
 |---|---|---|
-| `0x01` | HELLO | `{"id","name","platform","port","v"}` (sent by both sides when the connection opens) |
+| `0x01` | HELLO | `{"id","name","platform","port","v","video"}` (sent by both sides when the connection opens; `video` is true for apps that can show video) |
 | `0x02` | OPEN | `{"sampleRate":16000,"group":bool}` (asks to open a two-way line) |
 | `0x05` | ACCEPT | – (sent automatically when auto-answer is on) |
 | `0x06` | REJECT | `{"reason":"busy"\|"declined"\|"timeout"}` |
 | `0x03` | CLOSE | – (hang up) |
 | `0x04` | AUDIO | PCM16 little-endian, mono, 16 kHz, about every 20 ms, **both directions** while connected |
 | `0x08/0x09` | PING / PONG | – (every second while connected; 8 s of silence = lost) |
+| `0x0A` | VIDEO | `[rotation:1][JPEG]`, about 640×480 at up to 15 fps while the camera is on; just the rotation byte = camera off. Only sent to peers whose HELLO has `"video":true` |
+| `0x0B` | VIDEO_ACK | – (one per VIDEO frame; at most 2 unacknowledged pictures per peer, so video never queues up in front of the audio) |
 
 Each device is in at most one conversation, so a second caller gets *busy*.
 With *Everyone*, the caller is the hub: each member streams to the hub and the
@@ -202,6 +214,9 @@ portable Windows folder, Android APKs, and the headless node for 32-bit and
 3. The other side opens automatically (or rings, if it has *Answer
    automatically* turned off). Both of you can now talk and listen at the
    same time. The timer and level meters show the line is live.
+   On Android or Windows, press **Camera on** for video (and the switch
+   button for the other camera, or the camera menu on Windows to pick a
+   webcam). The first time, Android asks for camera permission.
 4. Press **HANG UP** (either side) to end it. **Mute** turns your
    microphone off without hanging up.
 5. If a peer doesn't appear, press **+ Add** (or the 🔗 icon) and enter the IP

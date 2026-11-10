@@ -14,6 +14,7 @@ import android.provider.Settings
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 /**
@@ -55,10 +56,12 @@ class GundilApp : Application() {
             override fun onPreEngineRestart() {}
             override fun onEngineWillDestroy() {
                 FlutterEngineCache.getInstance().remove(ENGINE_ID)
+                camera.stop()
                 releaseMulticastLock()
             }
         })
         setUpChannel(engine)
+        setUpCamera(engine)
         engine.dartExecutor.executeDartEntrypoint(
             DartExecutor.DartEntrypoint.createDefault()
         )
@@ -143,6 +146,32 @@ class GundilApp : Application() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // --------------------------------------------------------------- camera
+
+    /** Video-call camera (see [CameraCapture]). */
+    private val camera by lazy { CameraCapture(this) }
+
+    private fun setUpCamera(engine: FlutterEngine) {
+        val messenger = engine.dartExecutor.binaryMessenger
+        EventChannel(messenger, "p2p_intercom/camera/frames").setStreamHandler(camera)
+        MethodChannel(messenger, "p2p_intercom/camera").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestPermission" -> requestPermission(Manifest.permission.CAMERA, result)
+                "list" -> result.success(camera.list())
+                "start" -> camera.start(
+                    id = call.argument<String>("id") ?: CameraCapture.FRONT,
+                    width = call.argument<Int>("width") ?: 640,
+                    height = call.argument<Int>("height") ?: 480,
+                    fps = call.argument<Int>("fps") ?: 15,
+                    quality = call.argument<Int>("quality") ?: 70,
+                    result = result
+                )
+                "stop" -> { camera.stop(); result.success(null) }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun requestPermission(permission: String, result: MethodChannel.Result) {

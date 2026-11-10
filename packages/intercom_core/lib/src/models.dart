@@ -25,6 +25,9 @@ class Peer {
   /// Protocol version the peer reported (0 = unknown yet).
   int version = 0;
 
+  /// The peer can show camera video (the app; not the headless node).
+  bool video = false;
+
   /// Too old for two-way audio (the user must update that device).
   bool get outdated => version != 0 && version < 3;
 

@@ -4,13 +4,31 @@ import 'package:flutter/material.dart';
 
 import '../src/audio_routes.dart';
 import '../src/intercom_service.dart';
+import '../src/video_call.dart';
 
 /// Main control area: connect / hang up the two-way audio line, accept or
 /// decline when someone rings, mute and speaker controls.
 class IntercomPanel extends StatelessWidget {
-  const IntercomPanel({super.key, required this.service, this.compact = false});
+  const IntercomPanel({
+    super.key,
+    required this.service,
+    this.video,
+    this.onMessage,
+    this.compact = false,
+    this.showParticipants = true,
+  });
 
   final IntercomService service;
+
+  /// The local camera (camera buttons during a call), if available.
+  final VideoCall? video;
+
+  /// Shows a short message (e.g. "Camera permission denied").
+  final void Function(String message, {bool error})? onMessage;
+
+  /// Show the participant cards (hidden while the video takes the screen;
+  /// the video tiles show who's speaking instead).
+  final bool showParticipants;
 
   /// Smaller layout for phones (under the peer list).
   final bool compact;
@@ -40,7 +58,9 @@ class IntercomPanel extends StatelessWidget {
     );
   }
 
-  double get _size => compact ? 132 : 200;
+  double get _size => !showParticipants
+      ? (compact ? 76 : 96) // Video on: leave the room to the pictures.
+      : (compact ? 132 : 200);
 
   // ------------------------------------------------------------------ idle
 
@@ -159,7 +179,7 @@ class IntercomPanel extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (connected.isNotEmpty)
+        if (connected.isNotEmpty && showParticipants)
           Padding(
             padding: EdgeInsets.only(bottom: compact ? 10 : 20),
             child: _Participants(
@@ -211,6 +231,8 @@ class IntercomPanel extends StatelessWidget {
                   : null,
             ),
             if (Platform.isAndroid) const AudioOutputButton(),
+            if (connected.isNotEmpty && video != null && VideoCall.supported)
+              CameraButtons(video: video!, onMessage: onMessage),
           ],
         ),
       ],
@@ -545,6 +567,100 @@ class AudioOutputButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Camera on/off, and switching camera (Android: front ⇄ back; Windows:
+/// choose the built-in or a USB webcam). The camera only turns on when the
+/// user presses the button.
+class CameraButtons extends StatelessWidget {
+  const CameraButtons({super.key, required this.video, this.onMessage});
+
+  final VideoCall video;
+  final void Function(String message, {bool error})? onMessage;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ListenableBuilder(
+      listenable: video,
+      builder: (context, _) {
+        final on = video.on;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            FilledButton.tonalIcon(
+              onPressed: video.busy ? null : () => _run(video.toggle),
+              icon: Icon(on ? Icons.videocam : Icons.videocam_off),
+              label: Text(on ? 'Camera off' : 'Camera on'),
+              style: on
+                  ? FilledButton.styleFrom(
+                      backgroundColor: scheme.primary,
+                      foregroundColor: scheme.onPrimary,
+                    )
+                  : null,
+            ),
+            if (on && Platform.isAndroid && video.canSwitch) ...[
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                tooltip: video.camera?.facing == CameraFacing.front
+                    ? 'Switch to back camera'
+                    : 'Switch to front camera',
+                onPressed: video.busy ? null : () => _run(video.switchCamera),
+                icon: const Icon(Icons.cameraswitch),
+              ),
+            ],
+            if (Platform.isWindows) ...[
+              const SizedBox(width: 8),
+              _WebcamMenu(video: video, run: _run),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _run(Future<Object?> Function() action) async {
+    final result = await action();
+    if (result is String) onMessage?.call(result, error: true);
+  }
+}
+
+/// Windows: pick which webcam to use (built-in, USB, ...).
+class _WebcamMenu extends StatelessWidget {
+  const _WebcamMenu({required this.video, required this.run});
+
+  final VideoCall video;
+  final Future<void> Function(Future<Object?> Function() action) run;
+
+  @override
+  Widget build(BuildContext context) {
+    return MenuAnchor(
+      onOpen: video.refreshCameras,
+      menuChildren: [
+        if (video.cameras.isEmpty)
+          const MenuItemButton(child: Text('No camera found')),
+        for (final c in video.cameras)
+          MenuItemButton(
+            leadingIcon: const Icon(Icons.videocam),
+            trailingIcon: video.on && c.id == video.camera?.id
+                ? const Icon(Icons.check)
+                : null,
+            onPressed: () => run(() => video.select(c.id)),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 280),
+              child: Text(c.name, overflow: TextOverflow.ellipsis),
+            ),
+          ),
+      ],
+      builder: (context, controller, _) => IconButton.filledTonal(
+        tooltip: 'Choose camera',
+        onPressed: video.busy
+            ? null
+            : () => controller.isOpen ? controller.close() : controller.open(),
+        icon: const Icon(Icons.switch_video),
       ),
     );
   }

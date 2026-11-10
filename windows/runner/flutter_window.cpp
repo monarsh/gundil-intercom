@@ -55,6 +55,8 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   RegisterWindowChannel();
+  camera_ = std::make_unique<CameraCapture>(
+      flutter_controller_->engine()->messenger(), GetHandle());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   taskbar_created_message_ = ::RegisterWindowMessageW(L"TaskbarCreated");
@@ -80,6 +82,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   RemoveTrayIcon();
+  camera_ = nullptr;
   channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -259,6 +262,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (result) {
       return *result;
     }
+  }
+
+  // Pictures and errors from the webcam thread.
+  if (camera_ && camera_->HandleMessage(message)) {
+    return 0;
   }
 
   // Explorer restarted: the tray icon must be added again.

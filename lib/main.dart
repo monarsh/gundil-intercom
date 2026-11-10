@@ -16,6 +16,7 @@ Future<void> main() async {
     name: settings.name,
     audio: NativeAudioEngine(),
     autoAnswer: settings.autoAnswer,
+    videoReceive: true,
     echoSuppression: settings.echoSuppression,
     savedPeers: settings.savedPeers,
     onSavedPeersChanged: (list) => settings.savedPeers = list,

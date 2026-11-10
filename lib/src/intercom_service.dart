@@ -18,6 +18,7 @@ class IntercomService extends IntercomCore with ChangeNotifier {
     super.sampleRate,
     super.rogerBeep,
     super.autoAnswer,
+    super.videoReceive,
     super.echoSuppression,
     super.savedPeers,
     super.onSavedPeersChanged,
@@ -32,6 +33,16 @@ class IntercomService extends IntercomCore with ChangeNotifier {
     notifyListeners();
   }
 
+  /// Ticks on every received camera picture, so video widgets can repaint
+  /// without rebuilding the whole UI.
+  final ValueNotifier<int> videoTick = ValueNotifier(0);
+
   @override
-  void onShutdown() => dispose();
+  void videoChanged(String peerId) => videoTick.value++;
+
+  @override
+  void onShutdown() {
+    videoTick.dispose();
+    dispose();
+  }
 }

@@ -113,4 +113,21 @@ void main() {
       );
     });
   });
+
+  group('VideoFrame', () {
+    test('round trip keeps picture and rotation', () {
+      final jpeg = Uint8List.fromList([0xFF, 0xD8, 7, 8, 0xFF, 0xD9]);
+      final f = Frame(MessageType.video, VideoFrame.encode(jpeg, rotation: 1));
+      final back = FrameDecoder().add(f.encode()).single;
+      expect(back.type, MessageType.video);
+      final v = VideoFrame.decode(back.payload)!;
+      expect(v.jpeg, jpeg);
+      expect(v.rotation, 1);
+    });
+
+    test('a bare header means the camera is off', () {
+      expect(VideoFrame.decode(VideoFrame.encodeOff()), isNull);
+      expect(VideoFrame.decode(Uint8List(0)), isNull);
+    });
+  });
 }

@@ -84,6 +84,7 @@ class IntercomCore {
     this.sampleRate = defaultSampleRate,
     this.rogerBeep = true,
     this.autoAnswer = true,
+    this.videoReceive = false,
     bool? echoSuppression,
     List<SavedPeer> savedPeers = const [],
     this.onSavedPeersChanged,
@@ -113,6 +114,10 @@ class IntercomCore {
   /// Turn the microphone down while the far end talks (for devices without
   /// a hardware echo canceller).
   bool echoSuppression;
+
+  /// This device can show camera video from peers (the app, not the
+  /// headless node). Announced in HELLO; peers only send video if it's set.
+  final bool videoReceive;
 
   /// Called whenever the saved peer list changes, so it can be persisted.
   final void Function(List<SavedPeer> saved)? onSavedPeersChanged;
@@ -155,6 +160,14 @@ class IntercomCore {
   /// the indicator doesn't flicker between words.
   static const Duration speakingHold = Duration(milliseconds: 400);
 
+  /// Camera pictures sent to one peer and not acknowledged yet. New pictures
+  /// are skipped while this many are on the way (slow network).
+  static const int maxVideoInFlight = 2;
+
+  /// A peer's video disappears when no picture arrived for this long (its
+  /// camera stopped, e.g. the app went to the background).
+  static const Duration videoStale = Duration(seconds: 3);
+
   /// Audio kept queued in the speaker (absorbs timer jitter).
   int get playbackTarget => sampleRate * 100 ~/ 1000;
 
@@ -193,6 +206,12 @@ class IntercomCore {
   final Map<String, DateTime> _voiceAt = {};
   final AudioMixer _mixer;
   final EchoSuppressor _echo;
+
+  // Camera video.
+  bool _cameraOn = false;
+  final Map<String, VideoFrame> _remoteVideo = {};
+  final Map<String, int> _videoInFlight = {};
+  final Map<String, DateTime> _videoSentAt = {};
 
   final StreamController<IntercomEvent> _events =
       StreamController<IntercomEvent>.broadcast();
@@ -248,6 +267,22 @@ class IntercomCore {
   /// Whether we are talking (microphone above the voice threshold).
   bool get selfSpeaking =>
       _audioRunning && !_muted && _micLevel >= speakingThreshold;
+
+  /// We are sending camera video (see [setCamera]).
+  bool get cameraOn => _cameraOn;
+
+  /// Latest camera picture from [peerId], or null when its camera is off.
+  VideoFrame? remoteVideo(String peerId) => _remoteVideo[peerId];
+
+  /// Connected peers currently sending camera video.
+  List<String> get videoPeers => [
+    for (final id in _conversation?.connected ?? const <String>[])
+      if (_remoteVideo.containsKey(id)) id,
+  ];
+
+  /// Called on every new picture from [peerId] and when its video stops.
+  /// The Flutter app uses this to repaint only the video, not the whole UI.
+  void videoChanged(String peerId) {}
 
   /// Current echo-suppression microphone gain (1 = open).
   double get micGain => echoSuppression ? _echo.gain : 1;
@@ -625,6 +660,7 @@ class IntercomCore {
     'platform': Platform.operatingSystem,
     'port': _server?.port ?? preferredPort,
     'v': protocolVersion,
+    if (videoReceive) 'video': true,
   });
 
   void _adopt(PeerConnection c, {void Function(String id)? onHello}) {
@@ -701,6 +737,7 @@ class IntercomCore {
       if (current == null || current.isClosed) _links[id] = c;
       p.connected = true;
       p.version = (m['v'] as int?) ?? 1;
+      p.video = m['video'] == true;
       _resolveSaved(p);
       onHello?.call(id);
       changed();
@@ -728,6 +765,10 @@ class IntercomCore {
         _onClose(id);
       case MessageType.audio:
         _onAudio(id, f.payload);
+      case MessageType.video:
+        _onVideo(c, id, f.payload);
+      case MessageType.videoAck:
+        _onVideoAck(id);
     }
   }
 
@@ -941,6 +982,7 @@ class IntercomCore {
     final first = !conv.isConnected;
     conv.members[id] = MemberState.connected;
     conv.lastHeard[id] = DateTime.now();
+    _videoInFlight.remove(id);
     if (conv.ringing.isEmpty) _stopRinging();
     if (first) {
       conv.connectedAt = DateTime.now();
@@ -965,6 +1007,8 @@ class IntercomCore {
     conv.invitedAt.remove(id);
     _mixer.remove(id);
     _clearLevels(id);
+    _videoInFlight.remove(id);
+    if (_remoteVideo.remove(id) != null) videoChanged(id);
     final kind = wasConnected
         ? IntercomEventKind.disconnected
         : IntercomEventKind.info;
@@ -1002,6 +1046,11 @@ class IntercomCore {
       _stopAudio();
     }
     _conversation = null;
+    _cameraOn = false;
+    _videoInFlight.clear();
+    final hadVideo = _remoteVideo.keys.toList();
+    _remoteVideo.clear();
+    hadVideo.forEach(videoChanged);
     _mixer.clear();
     _peerLevel.clear();
     _levelAt.clear();
@@ -1015,6 +1064,12 @@ class IntercomCore {
     final conv = _conversation;
     if (conv == null) return;
     final now = DateTime.now();
+    for (final id in _remoteVideo.keys.toList()) {
+      if (now.difference(_remoteVideo[id]!.receivedAt) > videoStale) {
+        _remoteVideo.remove(id);
+        videoChanged(id);
+      }
+    }
     for (final entry in conv.members.entries.toList()) {
       final id = entry.key;
       switch (entry.value) {
@@ -1062,6 +1117,89 @@ class IntercomCore {
     _levelAt[id] = now;
     if (level >= speakingThreshold) _voiceAt[id] = now;
     if (_audioRunning) _mixer.add(id, samples);
+  }
+
+  // ------------------------------------------------------------------ video
+
+  /// Turns sending camera video on or off. The app's camera calls this, then
+  /// feeds pictures with [sendVideoFrame]. Turning it off tells the peers
+  /// at once; it also goes off by itself when the conversation ends.
+  void setCamera(bool on) {
+    if (on && !inConversation) on = false;
+    if (on == _cameraOn) return;
+    _cameraOn = on;
+    if (!on) {
+      final off = Frame(MessageType.video, VideoFrame.encodeOff());
+      for (final id in _conversation?.connected ?? const <String>[]) {
+        if (_peers[id]?.video ?? false) _send(id, off);
+      }
+      _videoInFlight.clear();
+    }
+    changed();
+  }
+
+  /// Sends one JPEG camera picture to every connected member that can show
+  /// video. A member that hasn't acknowledged the previous pictures yet
+  /// skips this one (keeps the line responsive on slow Wi-Fi). Returns how
+  /// many members it was sent to.
+  int sendVideoFrame(Uint8List jpeg, {int rotation = 0}) {
+    final conv = _conversation;
+    if (conv == null || !_cameraOn) return 0;
+    if (jpeg.length + 1 > maxFramePayload) return 0;
+    final now = DateTime.now();
+    Frame? frame;
+    var sent = 0;
+    for (final id in conv.connected) {
+      if (!(_peers[id]?.video ?? false)) continue;
+      var pending = _videoInFlight[id] ?? 0;
+      if (pending >= maxVideoInFlight) {
+        // Acknowledgements normally take milliseconds; after this long they
+        // are not coming (e.g. the peer just restarted its call).
+        final at = _videoSentAt[id];
+        if (at != null && now.difference(at) < const Duration(seconds: 2)) {
+          continue;
+        }
+        pending = 0;
+      }
+      frame ??= Frame(
+        MessageType.video,
+        VideoFrame.encode(jpeg, rotation: rotation),
+      );
+      _send(id, frame);
+      _videoInFlight[id] = pending + 1;
+      _videoSentAt[id] = now;
+      sent++;
+    }
+    return sent;
+  }
+
+  void _onVideo(PeerConnection c, String id, Uint8List payload) {
+    // Always acknowledge, even when we no longer want it, so the sender's
+    // flow control never stalls.
+    c.send(Frame.empty(MessageType.videoAck));
+    final conv = _conversation;
+    if (!videoReceive ||
+        conv == null ||
+        conv.members[id] != MemberState.connected) {
+      return;
+    }
+    final frame = VideoFrame.decode(payload);
+    if (frame == null) {
+      if (_remoteVideo.remove(id) != null) {
+        videoChanged(id);
+        changed();
+      }
+      return;
+    }
+    final isNew = !_remoteVideo.containsKey(id);
+    _remoteVideo[id] = frame;
+    videoChanged(id);
+    if (isNew) changed();
+  }
+
+  void _onVideoAck(String id) {
+    final n = _videoInFlight[id];
+    if (n != null && n > 0) _videoInFlight[id] = n - 1;
   }
 
   bool _ensureAudio() {

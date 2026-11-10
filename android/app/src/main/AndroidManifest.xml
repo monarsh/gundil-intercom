@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <!-- Push-to-talk microphone -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Video calls: the camera, turned on by the user during a call -->
+    <uses-permission android:name="android.permission.CAMERA" />
     <!-- Background mode: foreground service, notification, keep CPU/Wi-Fi
          awake while listening, start after boot, battery-optimization prompt -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -23,6 +25,7 @@
 
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
     <uses-feature android:name="android.hardware.wifi" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
     <application
         android:label="Gundil Intercom"

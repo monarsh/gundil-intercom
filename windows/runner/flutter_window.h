@@ -11,6 +11,7 @@
 #include <memory>
 #include <string>
 
+#include "camera_capture.h"
 #include "win32_window.h"
 
 // Registered window message another instance posts to bring this one up
@@ -52,6 +53,9 @@ class FlutterWindow : public Win32Window {
 
   // "gundil/window" channel used by Dart to configure the tray.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
+
+  // Webcam for video calls ("p2p_intercom/camera" channels).
+  std::unique_ptr<CameraCapture> camera_;
 
   NOTIFYICONDATAW tray_icon_{};
   bool tray_added_ = false;
