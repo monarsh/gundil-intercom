@@ -37,8 +37,13 @@ only.
   the tray tooltip names who's speaking. On Android, the background-mode
   notification shows "*Connected with Gate*" or "*Gate wants to talk*". The
   Orange Pi / Raspberry Pi node logs "*🔊 Gate is speaking*".
-- **Mute** and a call timer. On Android
-  you can also switch between loudspeaker and earpiece.
+- **Mute** and a call timer.
+- **Android audio output picker**: during a call, tap the output button to
+  switch between **Speaker**, **Phone (earpiece)**, a **Bluetooth headset**
+  (listed by name; its microphone is used too) and a **wired headset**. Calls
+  start on Bluetooth if one is connected, else a wired headset, else the
+  speaker. Connecting a headset mid-call switches to it, and if it
+  disconnects the audio falls back automatically.
 - **Echo handling**: Android uses the phone's echo canceller. PCs and boards
   use software echo suppression, which lowers your mic while the other side
   talks so they don't hear themselves. Turn it off with a headset.

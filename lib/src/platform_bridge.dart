@@ -24,12 +24,44 @@ class PlatformBridge {
   }
 
   /// Puts Android audio into voice-communication mode (enables the phone's
-  /// echo canceller) and routes it to the loudspeaker or the earpiece.
-  static Future<void> startCallAudio({required bool speaker}) =>
-      _invoke('startCallAudio', {'speaker': speaker});
-  static Future<void> setSpeaker(bool speaker) =>
-      _invoke('setSpeaker', {'speaker': speaker});
+  /// echo canceller) and picks the output (see [getAudioRoutes]).
+  static Future<void> startCallAudio() => _invoke('startCallAudio');
   static Future<void> stopCallAudio() => _invoke('stopCallAudio');
+
+  /// Audio outputs: `{"active", "routes": [{"id","type","name"}], "current"}`.
+  static Future<Map<Object?, Object?>?> getAudioRoutes() =>
+      _map('getAudioRoutes');
+
+  /// Switches the output; returns the new state.
+  static Future<Map<Object?, Object?>?> setAudioRoute(String id) =>
+      _map('setAudioRoute', {'id': id});
+
+  /// Called by Android whenever outputs or the current output change.
+  static void onAudioRoutesChanged(
+    void Function(Map<Object?, Object?> state) handler,
+  ) {
+    if (!_android) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'audioRoutesChanged' && call.arguments is Map) {
+        handler(call.arguments as Map<Object?, Object?>);
+      }
+      return null;
+    });
+  }
+
+  static Future<Map<Object?, Object?>?> _map(
+    String method, [
+    Object? args,
+  ]) async {
+    if (!_android) return null;
+    try {
+      return await _channel.invokeMethod<Map<Object?, Object?>>(method, args);
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
 
   /// Updates the background notification (Android background mode):
   /// e.g. "Connected with Gate". Empty title = back to "ready".
@@ -103,11 +135,7 @@ class FlutterPlatformHooks extends PlatformHooks {
   Future<void> releaseMulticastLock() => PlatformBridge.releaseMulticastLock();
 
   @override
-  Future<void> startCallAudio({required bool speaker}) =>
-      PlatformBridge.startCallAudio(speaker: speaker);
-
-  @override
-  Future<void> setSpeaker(bool speaker) => PlatformBridge.setSpeaker(speaker);
+  Future<void> startCallAudio() => PlatformBridge.startCallAudio();
 
   @override
   Future<void> stopCallAudio() => PlatformBridge.stopCallAudio();

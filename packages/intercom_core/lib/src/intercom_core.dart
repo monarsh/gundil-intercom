@@ -60,9 +60,10 @@ class PlatformHooks {
   Future<void> releaseMulticastLock() async {}
 
   /// Switches the device to two-way call audio (Android: voice
-  /// communication mode with echo cancellation, loudspeaker or earpiece).
-  Future<void> startCallAudio({required bool speaker}) async {}
-  Future<void> setSpeaker(bool speaker) async {}
+  /// communication mode with echo cancellation; the output — speaker,
+  /// earpiece, Bluetooth, wired headset — is chosen by the platform and the
+  /// app's audio-output picker).
+  Future<void> startCallAudio() async {}
   Future<void> stopCallAudio() async {}
 }
 
@@ -180,7 +181,6 @@ class IntercomCore {
   // Conversation state.
   Conversation? _conversation;
   bool _muted = false;
-  bool _speaker = true;
   bool _audioRunning = false;
   bool _micOk = false;
   double _speakerLevel = 0;
@@ -219,7 +219,6 @@ class IntercomCore {
   MemberState? memberState(String peerId) => _conversation?.members[peerId];
 
   bool get muted => _muted;
-  bool get speaker => _speaker;
 
   /// Level of the audio we're playing (0..1), for a meter.
   double get speakerLevel => _speakerLevel;
@@ -860,12 +859,6 @@ class IntercomCore {
     changed();
   }
 
-  void toggleSpeaker() {
-    _speaker = !_speaker;
-    hooks.setSpeaker(_speaker);
-    changed();
-  }
-
   void _onOpen(String id, Map<String, Object?> m) {
     final rate = (m['sampleRate'] as int?) ?? defaultSampleRate;
     if (rate != sampleRate) {
@@ -1085,7 +1078,7 @@ class IntercomCore {
   void _startAudio() {
     if (_audioRunning) return;
     if (!_ensureAudio()) return;
-    hooks.startCallAudio(speaker: _speaker);
+    hooks.startCallAudio();
     try {
       audio.startPlayback();
     } catch (e) {

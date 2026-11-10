@@ -6,8 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
-import android.media.AudioDeviceInfo
-import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -87,9 +85,13 @@ class GundilApp : Application() {
         stopService(Intent(this, IntercomService::class.java))
     }
 
+    /** Channel to Dart, also used to push audio-route changes. */
+    private var channel: MethodChannel? = null
+
     private fun setUpChannel(engine: FlutterEngine) {
-        MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
-            .setMethodCallHandler { call, result ->
+        val ch = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
+        channel = ch
+        ch.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "requestMicrophone" ->
                         requestPermission(Manifest.permission.RECORD_AUDIO, result)
@@ -99,13 +101,15 @@ class GundilApp : Application() {
                         } else {
                             result.success(true)
                         }
-                    "startCallAudio" -> {
-                        startCallAudio(call.argument<Boolean>("speaker") ?: true)
+                    "startCallAudio" -> { startCallAudio(); result.success(null) }
+                    "setSpeaker" -> {
+                        router.setSpeaker(call.argument<Boolean>("speaker") ?: true)
                         result.success(null)
                     }
-                    "setSpeaker" -> {
-                        setSpeaker(call.argument<Boolean>("speaker") ?: true)
-                        result.success(null)
+                    "getAudioRoutes" -> result.success(router.state())
+                    "setAudioRoute" -> {
+                        val id = call.argument<String>("id")
+                        result.success(if (id == null) router.state() else router.select(id))
                     }
                     "stopCallAudio" -> { stopCallAudio(); result.success(null) }
                     "setStatus" -> {
@@ -157,41 +161,19 @@ class GundilApp : Application() {
 
     // ----------------------------------------------------------- call audio
 
-    private val audioManager: AudioManager
-        get() = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    /** Picks the audio output (speaker / earpiece / Bluetooth / wired). */
+    private val router by lazy {
+        AudioRouter(this) { state -> channel?.invokeMethod("audioRoutesChanged", state) }
+    }
 
     /** Two-way audio: voice-communication mode (hardware echo canceller). */
-    private fun startCallAudio(speaker: Boolean) {
-        audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-        setSpeaker(speaker)
+    private fun startCallAudio() {
+        router.start()
         activity?.setKeepScreenOn(true)
     }
 
-    @Suppress("DEPRECATION")
-    private fun setSpeaker(speaker: Boolean) {
-        val am = audioManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (speaker) {
-                am.availableCommunicationDevices
-                    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    ?.let { am.setCommunicationDevice(it) }
-            } else {
-                am.clearCommunicationDevice()
-            }
-        } else {
-            am.isSpeakerphoneOn = speaker
-        }
-    }
-
-    @Suppress("DEPRECATION")
     private fun stopCallAudio() {
-        val am = audioManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            am.clearCommunicationDevice()
-        } else {
-            am.isSpeakerphoneOn = false
-        }
-        am.mode = AudioManager.MODE_NORMAL
+        router.stop()
         activity?.setKeepScreenOn(false)
     }
 

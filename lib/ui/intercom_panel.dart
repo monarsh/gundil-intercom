@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../src/audio_routes.dart';
 import '../src/intercom_service.dart';
 
 /// Main control area: connect / hang up the two-way audio line, accept or
@@ -209,12 +210,7 @@ class IntercomPanel extends StatelessWidget {
                     )
                   : null,
             ),
-            if (Platform.isAndroid)
-              FilledButton.tonalIcon(
-                onPressed: service.toggleSpeaker,
-                icon: Icon(service.speaker ? Icons.volume_up : Icons.hearing),
-                label: Text(service.speaker ? 'Speaker' : 'Earpiece'),
-              ),
+            if (Platform.isAndroid) const AudioOutputButton(),
           ],
         ),
       ],
@@ -460,4 +456,96 @@ class _PulseState extends State<_Pulse> with SingleTickerProviderStateMixin {
     ).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
     child: widget.child,
   );
+}
+
+/// Android: shows the current audio output (speaker, earpiece, Bluetooth,
+/// wired headset) and lets the user pick another.
+class AudioOutputButton extends StatelessWidget {
+  const AudioOutputButton({super.key});
+
+  static IconData iconFor(AudioRouteType t) => switch (t) {
+    AudioRouteType.speaker => Icons.volume_up,
+    AudioRouteType.earpiece => Icons.phone_in_talk,
+    AudioRouteType.bluetooth => Icons.bluetooth_audio,
+    AudioRouteType.wired => Icons.headset,
+    AudioRouteType.other => Icons.speaker,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final routes = AudioRoutes.instance;
+    return ListenableBuilder(
+      listenable: routes,
+      builder: (context, _) {
+        final cur = routes.current;
+        return FilledButton.tonalIcon(
+          onPressed: () => _pick(context),
+          icon: Icon(cur == null ? Icons.speaker : iconFor(cur.type)),
+          label: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 160),
+            child: Text(
+              cur?.name ?? 'Audio output',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pick(BuildContext context) async {
+    final routes = AudioRoutes.instance;
+    await routes.refresh();
+    if (!context.mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => ListenableBuilder(
+        listenable: routes,
+        builder: (ctx, _) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+                child: Text(
+                  'Audio output',
+                  style: Theme.of(ctx).textTheme.titleMedium,
+                ),
+              ),
+              if (routes.routes.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('No audio outputs found.'),
+                ),
+              for (final r in routes.routes)
+                ListTile(
+                  leading: Icon(iconFor(r.type)),
+                  title: Text(r.name),
+                  subtitle: switch (r.type) {
+                    AudioRouteType.bluetooth => const Text(
+                      'Bluetooth headset (uses its microphone)',
+                    ),
+                    AudioRouteType.wired => const Text('Wired headset'),
+                    _ => null,
+                  },
+                  trailing: r.id == routes.current?.id
+                      ? Icon(
+                          Icons.check_circle,
+                          color: Theme.of(ctx).colorScheme.primary,
+                        )
+                      : null,
+                  onTap: () async {
+                    await routes.select(r);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
