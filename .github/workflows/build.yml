@@ -186,7 +186,12 @@ jobs:
           cp "$A/gundil-intercom-node-linux-arm64/gundil-intercom-node-linux-arm64.tar.gz" "dist/gundil-intercom-node-$V-linux-arm64.tar.gz"
           chmod +x dist/*.AppImage
           (cd dist && sha256sum * > SHA256SUMS.txt)
-          sed "s/VERSION/$V/g" .github/release/notes.md > release-notes.md
+          # "What's new" for this tag (optional), then the general notes.
+          : > release-notes.md
+          if [ -f ".github/release/changelog/$TAG.md" ]; then
+            cat ".github/release/changelog/$TAG.md" >> release-notes.md
+          fi
+          sed "s/VERSION/$V/g" .github/release/notes.md >> release-notes.md
           ls -la dist
       - uses: softprops/action-gh-release@v2
         with:
