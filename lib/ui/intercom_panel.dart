@@ -131,6 +131,8 @@ class IntercomPanel extends StatelessWidget {
     final calling = conv.calling.toList();
 
     final String status;
+    String? timer;
+    final speakers = service.speakers;
     if (connected.isEmpty) {
       status = conv.group
           ? 'Connecting to everyone…'
@@ -140,8 +142,17 @@ class IntercomPanel extends StatelessWidget {
       final d = DateTime.now().difference(since);
       final mm = d.inMinutes.toString().padLeft(2, '0');
       final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
-      final names = connected.map(service.displayName).join(', ');
-      status = 'Connected with $names · $mm:$ss';
+      timer = 'Connected · $mm:$ss';
+      if (speakers.isNotEmpty) {
+        final names = speakers.map(service.displayName).toList();
+        status = names.length == 1
+            ? '${names.single} is speaking'
+            : '${names.sublist(0, names.length - 1).join(', ')} and '
+                  '${names.last} are speaking';
+      } else {
+        status =
+            'Connected with ${connected.map(service.displayName).join(', ')}';
+      }
     }
 
     return Column(
@@ -149,8 +160,12 @@ class IntercomPanel extends StatelessWidget {
       children: [
         if (connected.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: _Meters(service: service, compact: compact),
+            padding: EdgeInsets.only(bottom: compact ? 10 : 20),
+            child: _Participants(
+              service: service,
+              peers: connected,
+              compact: compact,
+            ),
           ),
         _RoundButton(
           size: _size,
@@ -166,8 +181,10 @@ class IntercomPanel extends StatelessWidget {
           textAlign: TextAlign.center,
           style: (compact ? text.titleMedium : text.titleLarge)?.copyWith(
             color: connected.isEmpty ? null : scheme.primary,
+            fontWeight: speakers.isNotEmpty ? FontWeight.w600 : null,
           ),
         ),
+        if (timer != null) Text(timer, style: text.bodySmall),
         if (conv.group && calling.isNotEmpty && connected.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -205,48 +222,154 @@ class IntercomPanel extends StatelessWidget {
   }
 }
 
-/// Microphone / speaker level meters.
-class _Meters extends StatelessWidget {
-  const _Meters({required this.service, required this.compact});
+/// One card per connected peer plus "You". Whoever is speaking gets a
+/// glowing ring, level bars and a "Speaking" label.
+class _Participants extends StatelessWidget {
+  const _Participants({
+    required this.service,
+    required this.peers,
+    required this.compact,
+  });
 
   final IntercomService service;
+  final List<String> peers;
   final bool compact;
 
   @override
   Widget build(BuildContext context) {
-    final width = compact ? 110.0 : 160.0;
-    Widget meter(IconData icon, double level, Color color, String tip) =>
-        Tooltip(
-          message: tip,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 18),
-              const SizedBox(width: 6),
-              SizedBox(
-                width: width,
-                height: 6,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(3),
-                  child: LinearProgressIndicator(value: level, color: color),
-                ),
-              ),
-            ],
-          ),
-        );
-    final ducked = service.micGain < 0.5;
+    final echoLowered = service.micGain < 0.5;
     return Wrap(
-      spacing: 20,
-      runSpacing: 6,
+      spacing: compact ? 12 : 20,
+      runSpacing: 12,
       alignment: WrapAlignment.center,
       children: [
-        meter(
-          service.muted ? Icons.mic_off : Icons.mic,
-          service.muted ? 0 : service.micLevel,
-          ducked ? Colors.orange : Colors.green,
-          ducked ? 'Your mic (lowered to stop echo)' : 'Your mic',
+        for (final id in peers)
+          _SpeakerTile(
+            name: service.displayName(id),
+            speaking: service.isSpeaking(id),
+            level: service.peerLevel(id),
+            compact: compact,
+          ),
+        _SpeakerTile(
+          name: 'You',
+          speaking: service.selfSpeaking,
+          level: service.muted ? 0 : service.micLevel,
+          compact: compact,
+          muted: service.muted,
+          note: echoLowered && !service.muted ? 'mic lowered (echo)' : null,
         ),
-        meter(Icons.volume_up, service.speakerLevel, Colors.blue, 'Speaker'),
+      ],
+    );
+  }
+}
+
+class _SpeakerTile extends StatelessWidget {
+  const _SpeakerTile({
+    required this.name,
+    required this.speaking,
+    required this.level,
+    required this.compact,
+    this.muted = false,
+    this.note,
+  });
+
+  final String name;
+  final bool speaking;
+  final double level;
+  final bool compact;
+  final bool muted;
+  final String? note;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
+    final r = compact ? 26.0 : 34.0;
+    final ring = speaking ? Colors.green : scheme.outlineVariant;
+    final initial = name.isEmpty ? '?' : name[0].toUpperCase();
+    return SizedBox(
+      width: compact ? 84 : 104,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: EdgeInsets.all(speaking ? 3 + 4 * level : 2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: ring,
+              boxShadow: speaking
+                  ? [
+                      BoxShadow(
+                        color: Colors.green.withValues(alpha: 0.45),
+                        blurRadius: 8 + 14 * level,
+                        spreadRadius: 1 + 3 * level,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: CircleAvatar(
+              radius: r,
+              backgroundColor: speaking
+                  ? Colors.green.shade100
+                  : scheme.surfaceContainerHighest,
+              foregroundColor: speaking
+                  ? Colors.green.shade900
+                  : scheme.onSurfaceVariant,
+              child: muted
+                  ? Icon(Icons.mic_off, size: r * 0.9)
+                  : Text(initial, style: TextStyle(fontSize: r * 0.8)),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: text.labelLarge?.copyWith(
+              fontWeight: speaking ? FontWeight.bold : null,
+            ),
+          ),
+          SizedBox(
+            height: 16,
+            child: speaking
+                ? _LevelBars(level: level)
+                : Text(
+                    muted ? 'muted' : (note ?? ''),
+                    style: text.labelSmall,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Small equalizer-style bars that move with the voice level.
+class _LevelBars extends StatelessWidget {
+  const _LevelBars({required this.level});
+  final double level;
+
+  @override
+  Widget build(BuildContext context) {
+    const shape = [0.55, 1.0, 0.75, 0.9, 0.6];
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (final f in shape)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 100),
+            margin: const EdgeInsets.symmetric(horizontal: 1.5),
+            width: 4,
+            height: 3 + 13 * (level * f).clamp(0.0, 1.0),
+            decoration: BoxDecoration(
+              color: Colors.green,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
       ],
     );
   }

@@ -120,6 +120,8 @@ class PeerList extends StatelessWidget {
           Flexible(
             child: Text(
               switch (state) {
+                MemberState.connected when service.isSpeaking(id!) =>
+                  'Speaking…',
                 MemberState.connected => 'Connected',
                 MemberState.calling => 'Calling…',
                 MemberState.ringing => 'Wants to talk',
@@ -136,7 +138,9 @@ class PeerList extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (state != null)
+          if (state == MemberState.connected && service.isSpeaking(id!))
+            const Icon(Icons.graphic_eq, color: Colors.green)
+          else if (state != null)
             Icon(switch (state) {
               MemberState.connected => Icons.call,
               MemberState.calling => Icons.phone_forwarded,

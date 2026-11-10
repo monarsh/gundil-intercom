@@ -7,7 +7,7 @@ phone call, until one of you hangs up. Intercoms answer automatically, like a
 door station; you can turn that off to ring and accept instead. It's audio
 only.
 
-![Desktop app connected to the "Gate" intercom](docs/screenshot.png)
+![Desktop app connected to the "Gate" intercom while Gate is speaking](docs/screenshot.png)
 
 | Platform | Runs | Echo handling |
 |---|---|---|
@@ -28,7 +28,16 @@ only.
   intercoms at once. You hear all of them mixed together and they all hear you.
 - **Switch with one tap**: pick another peer and press Connect. The current
   line is hung up and the new one opens.
-- **Mute**, live microphone/speaker level meters and a call timer. On Android
+- **See who is speaking**: each participant (and *You*) has a card that
+  lights up with a green ring and level bars while they talk, the status
+  reads "*Gate is speaking*", and the peer list shows *Speaking…*. With
+  *Everyone* you can tell the voices apart.
+- **Know when someone connects**: an in-app "*Gate connected*" message. If
+  the window is hidden, Windows shows a notification from the tray icon and
+  the tray tooltip names who's speaking. On Android, the background-mode
+  notification shows "*Connected with Gate*" or "*Gate wants to talk*". The
+  Orange Pi / Raspberry Pi node logs "*🔊 Gate is speaking*".
+- **Mute** and a call timer. On Android
   you can also switch between loudspeaker and earpiece.
 - **Echo handling**: Android uses the phone's echo canceller. PCs and boards
   use software echo suppression, which lowers your mic while the other side

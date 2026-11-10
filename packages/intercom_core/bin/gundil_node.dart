@@ -189,6 +189,9 @@ class _Node {
   void Function()? onQuit;
 
   String _lastStatus = '';
+  // Who was speaking, and when we last saw them speak (log each burst once).
+  final Set<String> _speaking = {};
+  final Map<String, DateTime> _lastSpoke = {};
   final Map<String, bool> _online = {};
   Timer? _blink;
   bool _ledState = false;
@@ -224,6 +227,20 @@ class _Node {
       }
       _lastStatus = status;
     }
+    final now = DateTime.now();
+    final speakers = core.speakers.toSet();
+    for (final id in speakers.difference(_speaking)) {
+      final last = _lastSpoke[id];
+      if (last == null || now.difference(last) > const Duration(seconds: 2)) {
+        log('🔊 ${core.displayName(id)} is speaking');
+      }
+    }
+    for (final id in speakers) {
+      _lastSpoke[id] = now;
+    }
+    _speaking
+      ..clear()
+      ..addAll(speakers);
     for (final e in core.entries) {
       final was = _online[e.key];
       if (was != e.online) {

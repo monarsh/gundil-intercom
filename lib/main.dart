@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'src/intercom_service.dart';
+import 'src/platform_bridge.dart';
 import 'src/settings.dart';
 import 'src/window_bridge.dart';
 import 'ui/home_page.dart';
@@ -20,7 +23,9 @@ Future<void> main() async {
   await service.start();
   if (WindowBridge.supported) {
     await WindowBridge.setTrayEnabled(settings.minimizeToTray);
-    _keepTrayTooltipUpdated(service);
+  }
+  if (WindowBridge.supported || Platform.isAndroid) {
+    _mirrorStatusOutsideApp(service);
   }
   runApp(IntercomApp(service: service, settings: settings));
 }
@@ -52,31 +57,62 @@ class IntercomApp extends StatelessWidget {
   }
 }
 
-/// Shows the intercom status when hovering the Windows tray icon.
-void _keepTrayTooltipUpdated(IntercomService service) {
-  String? last;
+/// Keeps people informed when they aren't looking at the app:
+/// * Windows: tray tooltip ("Gate is speaking") and a notification when a
+///   line opens or someone rings while the window is hidden;
+/// * Android: the background-mode notification ("Connected with Gate").
+void _mirrorStatusOutsideApp(IntercomService service) {
+  String? lastTooltip;
+  String? lastAndroid;
+  String names(Iterable<String> ids) => ids.map(service.displayName).join(', ');
+
   void update() {
     final conv = service.conversation;
-    final online = service.onlinePeers.length;
-    final String text;
+    final String tooltip;
+    final String android;
     if (conv == null) {
-      text = 'Gundil Intercom — $online online';
+      tooltip = 'Gundil Intercom — ${service.onlinePeers.length} online';
+      android = '';
     } else if (service.ringing) {
-      text =
-          'Gundil Intercom — '
-          '${conv.ringing.map(service.displayName).join(', ')} wants to talk';
+      tooltip = 'Gundil Intercom — ${names(conv.ringing)} wants to talk';
+      android = '${names(conv.ringing)} wants to talk';
     } else if (conv.isConnected) {
-      text =
-          'Gundil Intercom — connected with '
-          '${conv.connected.map(service.displayName).join(', ')}';
+      final speakers = service.speakers;
+      tooltip = speakers.isNotEmpty
+          ? 'Gundil Intercom — ${names(speakers)} speaking'
+          : 'Gundil Intercom — connected with ${names(conv.connected)}';
+      android = 'Connected with ${names(conv.connected)}';
     } else {
-      text = 'Gundil Intercom — connecting…';
+      tooltip = 'Gundil Intercom — connecting…';
+      android = 'Connecting…';
     }
-    if (text == last) return;
-    last = text;
-    WindowBridge.setTooltip(text);
+    if (WindowBridge.supported && tooltip != lastTooltip) {
+      lastTooltip = tooltip;
+      WindowBridge.setTooltip(tooltip);
+    }
+    if (Platform.isAndroid && android != lastAndroid) {
+      lastAndroid = android;
+      PlatformBridge.setStatus(
+        android,
+        android.isEmpty ? '' : 'Tap to open Gundil Intercom',
+      );
+    }
   }
 
   service.addListener(update);
   update();
+
+  if (WindowBridge.supported) {
+    service.events.listen((e) {
+      switch (e.kind) {
+        case IntercomEventKind.connected:
+          WindowBridge.notify('Gundil Intercom', '${e.message} — line open');
+        case IntercomEventKind.ringing:
+          WindowBridge.notify('Gundil Intercom', e.message);
+        case IntercomEventKind.disconnected:
+        case IntercomEventKind.info:
+          break;
+      }
+    });
+  }
 }

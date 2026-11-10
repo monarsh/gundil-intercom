@@ -17,6 +17,11 @@ class WindowBridge {
   /// Text shown when hovering the tray icon (max ~127 characters).
   static Future<void> setTooltip(String text) => _invoke('setTooltip', text);
 
+  /// Shows a Windows notification from the tray icon, only while the
+  /// window is hidden or minimized.
+  static Future<void> notify(String title, String text) =>
+      _invoke('notify', {'title': title, 'text': text});
+
   /// Brings the window back from the tray.
   static Future<void> show() => _invoke('show');
 

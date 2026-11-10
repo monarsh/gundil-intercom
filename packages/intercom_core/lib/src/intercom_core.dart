@@ -13,9 +13,31 @@ import 'protocol.dart';
 
 /// Notification for the UI (errors and short info messages).
 class IntercomEvent {
-  IntercomEvent(this.message, {this.error = false});
+  IntercomEvent(
+    this.message, {
+    this.error = false,
+    this.kind = IntercomEventKind.info,
+    this.peerId,
+  });
   final String message;
   final bool error;
+  final IntercomEventKind kind;
+
+  /// The peer the event is about, if any.
+  final String? peerId;
+}
+
+enum IntercomEventKind {
+  info,
+
+  /// A two-way line with [IntercomEvent.peerId] just opened.
+  connected,
+
+  /// The line with [IntercomEvent.peerId] closed (hang-up, lost, ...).
+  disconnected,
+
+  /// [IntercomEvent.peerId] is ringing us (auto-answer off).
+  ringing,
 }
 
 /// Walkie-talkie style intercom.
@@ -125,6 +147,13 @@ class IntercomCore {
   /// is dropped (crashed, out of Wi-Fi range, ...).
   static const Duration memberTimeout = Duration(seconds: 8);
 
+  /// Incoming level (see [rmsLevel], 0..1 ≈ -60..0 dBFS) counted as voice.
+  static const double speakingThreshold = 0.38;
+
+  /// A speaker stays "speaking" this long after their last loud chunk, so
+  /// the indicator doesn't flicker between words.
+  static const Duration speakingHold = Duration(milliseconds: 400);
+
   /// Audio kept queued in the speaker (absorbs timer jitter).
   int get playbackTarget => sampleRate * 100 ~/ 1000;
 
@@ -157,6 +186,11 @@ class IntercomCore {
   double _speakerLevel = 0;
   Timer? _pump;
   Timer? _ringTimer;
+
+  // Who is speaking: last level and last time voice was heard, per peer.
+  final Map<String, double> _peerLevel = {};
+  final Map<String, DateTime> _levelAt = {};
+  final Map<String, DateTime> _voiceAt = {};
   final AudioMixer _mixer;
   final EchoSuppressor _echo;
 
@@ -189,6 +223,32 @@ class IntercomCore {
 
   /// Level of the audio we're playing (0..1), for a meter.
   double get speakerLevel => _speakerLevel;
+
+  /// Current incoming level of [peerId] (0..1), 0 when silent.
+  double peerLevel(String peerId) {
+    final at = _levelAt[peerId];
+    if (at == null ||
+        DateTime.now().difference(at) > const Duration(milliseconds: 300)) {
+      return 0;
+    }
+    return _peerLevel[peerId] ?? 0;
+  }
+
+  /// Whether [peerId] is talking to us right now.
+  bool isSpeaking(String peerId) {
+    final at = _voiceAt[peerId];
+    return at != null && DateTime.now().difference(at) < speakingHold;
+  }
+
+  /// Connected peers that are talking right now.
+  List<String> get speakers => [
+    for (final id in _conversation?.connected ?? const <String>[])
+      if (isSpeaking(id)) id,
+  ];
+
+  /// Whether we are talking (microphone above the voice threshold).
+  bool get selfSpeaking =>
+      _audioRunning && !_muted && _micLevel >= speakingThreshold;
 
   /// Current echo-suppression microphone gain (1 = open).
   double get micGain => echoSuppression ? _echo.gain : 1;
@@ -832,7 +892,11 @@ class IntercomCore {
     if (autoAnswer) {
       accept();
     } else {
-      _emit('${displayName(id)} wants to talk');
+      _emit(
+        '${displayName(id)} wants to talk',
+        kind: IntercomEventKind.ringing,
+        peerId: id,
+      );
       _startRinging();
     }
     changed();
@@ -890,6 +954,11 @@ class IntercomCore {
       _startAudio();
       if (rogerBeep && _audioRunning) audio.play(connectTone(sampleRate));
     }
+    _emit(
+      '${displayName(id)} connected',
+      kind: IntercomEventKind.connected,
+      peerId: id,
+    );
     changed();
   }
 
@@ -897,20 +966,37 @@ class IntercomCore {
   void _removeMember(String id, {String? reason, bool quiet = false}) {
     final conv = _conversation;
     if (conv == null) return;
+    final wasConnected = conv.members[id] == MemberState.connected;
     conv.members.remove(id);
     conv.lastHeard.remove(id);
     conv.invitedAt.remove(id);
     _mixer.remove(id);
+    _clearLevels(id);
+    final kind = wasConnected
+        ? IntercomEventKind.disconnected
+        : IntercomEventKind.info;
     if (conv.members.isEmpty) {
-      _endConversation(quiet ? null : reason);
+      _endConversation(quiet ? null : reason, kind: kind, peerId: id);
     } else {
       if (conv.ringing.isEmpty) _stopRinging();
-      if (reason != null && !quiet && conv.group) _emit(reason);
+      if (reason != null && !quiet && conv.group) {
+        _emit(reason, kind: kind, peerId: id);
+      }
       changed();
     }
   }
 
-  void _endConversation(String? reason) {
+  void _clearLevels(String id) {
+    _peerLevel.remove(id);
+    _levelAt.remove(id);
+    _voiceAt.remove(id);
+  }
+
+  void _endConversation(
+    String? reason, {
+    IntercomEventKind kind = IntercomEventKind.info,
+    String? peerId,
+  }) {
     _stopRinging();
     if (_audioRunning && rogerBeep) {
       audio.play(hangupTone(sampleRate));
@@ -924,7 +1010,10 @@ class IntercomCore {
     }
     _conversation = null;
     _mixer.clear();
-    if (reason != null) _emit(reason);
+    _peerLevel.clear();
+    _levelAt.clear();
+    _voiceAt.clear();
+    if (reason != null) _emit(reason, kind: kind, peerId: peerId);
     changed();
   }
 
@@ -972,8 +1061,14 @@ class IntercomCore {
   void _onAudio(String id, Uint8List payload) {
     final conv = _conversation;
     if (conv == null || conv.members[id] != MemberState.connected) return;
-    conv.lastHeard[id] = DateTime.now();
-    if (_audioRunning) _mixer.add(id, bytesToPcm(payload));
+    final now = DateTime.now();
+    conv.lastHeard[id] = now;
+    final samples = bytesToPcm(payload);
+    final level = rmsLevel(samples);
+    _peerLevel[id] = level;
+    _levelAt[id] = now;
+    if (level >= speakingThreshold) _voiceAt[id] = now;
+    if (_audioRunning) _mixer.add(id, samples);
   }
 
   bool _ensureAudio() {
@@ -1133,8 +1228,16 @@ class IntercomCore {
     return Int16List.fromList(out);
   }
 
-  void _emit(String message, {bool error = false}) {
-    if (!_events.isClosed) _events.add(IntercomEvent(message, error: error));
+  void _emit(
+    String message, {
+    bool error = false,
+    IntercomEventKind kind = IntercomEventKind.info,
+    String? peerId,
+  }) {
+    if (_events.isClosed) return;
+    _events.add(
+      IntercomEvent(message, error: error, kind: kind, peerId: peerId),
+    );
   }
 
   static String _short(Object e) {

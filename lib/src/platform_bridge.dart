@@ -31,6 +31,11 @@ class PlatformBridge {
       _invoke('setSpeaker', {'speaker': speaker});
   static Future<void> stopCallAudio() => _invoke('stopCallAudio');
 
+  /// Updates the background notification (Android background mode):
+  /// e.g. "Connected with Gate". Empty title = back to "ready".
+  static Future<void> setStatus(String title, String text) =>
+      _invoke('setStatus', {'title': title, 'text': text});
+
   /// Many Android devices drop broadcast/multicast packets unless a Wi-Fi
   /// multicast lock is held.
   static Future<void> acquireMulticastLock() => _invoke('acquireMulticastLock');

@@ -114,6 +114,25 @@ void FlutterWindow::RegisterWindowChannel() {
             }
           }
           result->Success();
+        } else if (call.method_name() == "notify") {
+          // {"title": ..., "text": ...}: tray notification, only when the
+          // window isn't visible (otherwise the app shows it itself).
+          if (const auto* map = std::get_if<flutter::EncodableMap>(args)) {
+            std::string title, text;
+            auto t = map->find(flutter::EncodableValue("title"));
+            if (t != map->end()) {
+              if (const auto* v = std::get_if<std::string>(&t->second)) title = *v;
+            }
+            auto b = map->find(flutter::EncodableValue("text"));
+            if (b != map->end()) {
+              if (const auto* v = std::get_if<std::string>(&b->second)) text = *v;
+            }
+            HWND hwnd = GetHandle();
+            if (hwnd && (!::IsWindowVisible(hwnd) || ::IsIconic(hwnd))) {
+              ShowBalloon(Utf16FromUtf8(title), Utf16FromUtf8(text));
+            }
+          }
+          result->Success();
         } else if (call.method_name() == "show") {
           RestoreFromTray();
           result->Success();

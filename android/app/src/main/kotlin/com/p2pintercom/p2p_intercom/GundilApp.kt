@@ -108,6 +108,13 @@ class GundilApp : Application() {
                         result.success(null)
                     }
                     "stopCallAudio" -> { stopCallAudio(); result.success(null) }
+                    "setStatus" -> {
+                        IntercomService.instance?.setStatus(
+                            call.argument<String>("title"),
+                            call.argument<String>("text")
+                        )
+                        result.success(null)
+                    }
                     "acquireMulticastLock" -> { acquireMulticastLock(); result.success(null) }
                     "releaseMulticastLock" -> { releaseMulticastLock(); result.success(null) }
                     "getBackground" -> result.success(backgroundEnabled)

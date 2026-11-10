@@ -28,6 +28,23 @@ class IntercomService : Service() {
         private const val CHANNEL_ID = "intercom_background"
         private const val NOTIFICATION_ID = 4712
         const val EXTRA_WITH_MIC = "with_mic"
+
+        /** The running service, to update its notification. */
+        @Volatile var instance: IntercomService? = null
+
+        private const val DEFAULT_TITLE = "Gundil Intercom is ready"
+        private const val DEFAULT_TEXT =
+            "Other intercoms can connect for two-way talk. Tap to open."
+    }
+
+    private var title = DEFAULT_TITLE
+    private var text = DEFAULT_TEXT
+
+    /** Shows who we're connected with / who is calling (empty = idle). */
+    fun setStatus(newTitle: String?, newText: String?) {
+        title = if (newTitle.isNullOrEmpty()) DEFAULT_TITLE else newTitle
+        text = if (newTitle.isNullOrEmpty()) DEFAULT_TEXT else (newText ?: "")
+        goForeground()
     }
 
     private var withMic = false
@@ -37,6 +54,7 @@ class IntercomService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         goForeground()
         (application as GundilApp).ensureEngine()
         acquireLocks()
@@ -54,6 +72,7 @@ class IntercomService : Service() {
     }
 
     override fun onDestroy() {
+        if (instance === this) instance = null
         releaseLocks()
         super.onDestroy()
     }
@@ -88,8 +107,9 @@ class IntercomService : Service() {
             Notification.Builder(this).setPriority(Notification.PRIORITY_LOW)
         }
         val notification = builder
-            .setContentTitle("Gundil Intercom is ready")
-            .setContentText("Other intercoms can connect for two-way talk. Tap to open.")
+            .setContentTitle(title)
+            .setContentText(text)
+            .setOnlyAlertOnce(true)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(open)
             .setOngoing(true)

@@ -179,6 +179,60 @@ void main() {
     expect(alice.conversation!.members.keys, ['carol-id']);
   });
 
+  test('the receiving side sees who is speaking', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => alice.inConversation && bob.inConversation);
+    expect(alice.isSpeaking('bob-id'), isFalse);
+
+    // Quiet background noise / echo does not count as speaking.
+    bobAudio.inject(voice(1600, 30));
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(alice.isSpeaking('bob-id'), isFalse);
+
+    // Bob talks: Alice sees him speaking, with a level.
+    final feeder = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      bobAudio.inject(voice(320, 5000));
+    });
+    await eventually(() => alice.isSpeaking('bob-id'));
+    expect(alice.speakers, ['bob-id']);
+    expect(alice.peerLevel('bob-id'), greaterThan(0.5));
+    expect(bob.isSpeaking('alice-id'), isFalse); // Alice is silent
+    expect(bob.selfSpeaking, isTrue);
+
+    // Bob stops: the indicator clears after the hold time.
+    feeder.cancel();
+    await eventually(() => !alice.isSpeaking('bob-id'));
+    expect(alice.speakers, isEmpty);
+  });
+
+  test('connect / hang-up events name the peer', () async {
+    final aliceEvents = <IntercomEvent>[];
+    final bobEvents = <IntercomEvent>[];
+    final s1 = alice.events.listen(aliceEvents.add);
+    final s2 = bob.events.listen(bobEvents.add);
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(
+      () => bobEvents.any((e) => e.kind == IntercomEventKind.connected),
+    );
+    final c = bobEvents.firstWhere(
+      (e) => e.kind == IntercomEventKind.connected,
+    );
+    expect(c.peerId, 'alice-id');
+    expect(c.message, 'Alice connected');
+
+    bob.hangUp();
+    await eventually(
+      () => aliceEvents.any((e) => e.kind == IntercomEventKind.disconnected),
+    );
+    final d = aliceEvents.firstWhere(
+      (e) => e.kind == IntercomEventKind.disconnected,
+    );
+    expect(d.peerId, 'bob-id');
+    expect(d.message, contains('Bob hung up'));
+    await s1.cancel();
+    await s2.cancel();
+  });
+
   test('mute stops sending the microphone', () async {
     await alice.connect(const PeerTarget('bob-id'));
     await eventually(() => bob.inConversation);
