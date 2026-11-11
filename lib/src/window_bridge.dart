@@ -2,12 +2,29 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
-/// Talks to the Windows runner's system tray (windows/runner/flutter_window.cpp).
+/// Talks to the system tray of the desktop runners:
+/// windows/runner/flutter_window.cpp and linux/runner/window_tray.cc.
 /// Every call is a no-op on other platforms.
 class WindowBridge {
   static const MethodChannel _channel = MethodChannel('gundil/window');
 
-  static bool get supported => Platform.isWindows;
+  static bool get supported => Platform.isWindows || Platform.isLinux;
+
+  /// Whether a tray icon can be shown. Always on Windows; on Linux it needs
+  /// libayatana-appindicator3 and a desktop with a tray (plain GNOME needs
+  /// the AppIndicator extension). Without one the window just minimizes to
+  /// the taskbar and closing quits.
+  static Future<bool> trayAvailable() async {
+    if (Platform.isWindows) return true;
+    if (!supported) return false;
+    try {
+      return await _channel.invokeMethod<bool>('trayAvailable') ?? false;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
   /// When on, minimize and the close button hide the window to the tray
   /// (the intercom keeps receiving); right-click the tray icon > Exit quits.

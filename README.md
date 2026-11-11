@@ -71,11 +71,12 @@ call, Android and Windows can also turn on their **camera** for video.
 - **Reliable**: a member that stops responding (crash, Wi-Fi lost) is dropped
   after 8 s. Unanswered calls time out after 30 s. Calling each other at the
   same moment just connects.
-- **Starts with Windows (or Linux login)**: optional. On Windows it starts
-  in the system tray at sign-in, so the intercom is always ready to receive.
-- **Windows system tray**: minimize or close the window and it keeps running
-  in the notification area. Click the tray icon to open it, right-click it
-  for *Open* / *Exit*. Hover over it to see who you're connected with.
+- **Starts with Windows (or Linux login)**: optional. It starts in the
+  system tray at sign-in, so the intercom is always ready to receive.
+- **System tray (Windows and Linux)**: minimize or close the window and it
+  keeps running in the tray. Use the tray icon to open it again or *Exit*.
+  It shows who you're connected with, and a notification appears when a
+  line opens while the window is hidden.
 - **Saved peers**: add a peer by IP (or keep a discovered one) and it stays in
   the list across restarts, greyed out while offline. The app keeps retrying
   in the background, so a saved peer comes online automatically. This also
@@ -265,6 +266,37 @@ taskbar to keep it visible).
 To have the X button quit the app instead, turn off **Settings → Minimize to
 tray**.
 
+### Linux system tray
+
+On Linux (PC and Raspberry Pi desktop app) the intercom also lives in the
+tray, through the standard *StatusNotifierItem* tray protocol:
+
+- **Close (X)**, or **minimize** on X11: the window hides to the tray and the
+  intercom keeps receiving. A one-time notification says so.
+- **Click** the tray icon for its menu: the status line (e.g. "Gundil
+  Intercom — Gate is speaking"), **Open Gundil Intercom** and **Exit**.
+  A middle click opens the window directly on most desktops.
+- A notification appears when a line opens or someone rings while the
+  window is hidden.
+- Starting the app again (menu, desktop icon) opens the running window: only
+  one copy runs at a time.
+
+It works out of the box on Ubuntu, KDE Plasma, Xfce, Cinnamon, MATE and
+LXQt. It needs:
+
+- the `libayatana-appindicator3-1` library (already installed on most
+  desktops; otherwise `sudo apt install libayatana-appindicator3-1`, or
+  `libappindicator-gtk3` on Fedora/Arch),
+- a desktop with a tray. **Plain GNOME** (Fedora, Debian) needs the
+  *AppIndicator and KStatusNotifierItem Support* extension (Ubuntu ships it).
+  **Raspberry Pi OS** shows tray icons on its X11 (LXDE) desktop; on the
+  newer Wayland panel it depends on the version.
+
+Without a tray, nothing changes: the window minimizes to the taskbar, the
+*Minimize to tray* setting isn't shown and closing the window quits. If the
+tray disappears while the window is hidden (panel restarted, extension
+turned off), the window comes back by itself.
+
 ### Start automatically
 
 - **Windows**: tick *"Start Gundil Intercom automatically when I sign in"* in
@@ -273,7 +305,8 @@ tray**.
   `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry. You can also
   turn it off in Task Manager → *Startup apps*.)
 - **Linux**: **Settings → Start automatically at login** creates
-  `~/.config/autostart/gundil-intercom.desktop`.
+  `~/.config/autostart/gundil-intercom.desktop`. It starts hidden in the
+  tray (or minimized when the desktop has no tray).
 - **Android**: see *Background mode on Android* below.
 
 Without the installer, you can do it by hand on Windows: press **Win+R**, type

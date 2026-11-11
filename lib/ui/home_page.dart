@@ -133,6 +133,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final autostartWas = await Autostart.isEnabled();
     var autostart = autostartWas;
     final trayWas = widget.settings.minimizeToTray;
+    final trayAvailable = await WindowBridge.trayAvailable();
     var autoAnswer = service.autoAnswer;
     var echo = service.echoSuppression;
     var tray = trayWas;
@@ -198,7 +199,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                           : 'Start automatically at login',
                     ),
                     subtitle: Text(
-                      Platform.isWindows
+                      trayAvailable
                           ? 'Starts in the system tray when you sign in, '
                                 'ready to receive.'
                           : 'Opens minimized when you log in, ready to '
@@ -229,14 +230,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     value: echo,
                     onChanged: (v) => setLocal(() => echo = v),
                   ),
-                if (WindowBridge.supported)
+                if (trayAvailable)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Minimize to tray'),
-                    subtitle: const Text(
-                      'Minimize and the close button keep it running in the '
-                      'notification area. Right-click the tray icon > Exit '
-                      'to quit.',
+                    subtitle: Text(
+                      Platform.isWindows
+                          ? 'Minimize and the close button keep it running in '
+                                'the notification area. Right-click the tray '
+                                'icon > Exit to quit.'
+                          : 'Minimize and the close button keep it running in '
+                                "the tray. Use the tray icon's menu to open "
+                                'it, or Exit to quit.',
                     ),
                     value: tray,
                     onChanged: (v) => setLocal(() => tray = v),

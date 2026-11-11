@@ -6,10 +6,12 @@
 #endif
 
 #include "flutter/generated_plugin_registrant.h"
+#include "window_tray.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;  // The single main window (weak).
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -17,18 +19,29 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   GtkWidget* toplevel = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  // "--minimized" is passed by the autostart entry (login): start hidden in
+  // the tray, or minimized when there is no tray.
+  const bool minimized =
+      g_object_get_data(G_OBJECT(toplevel), "start-minimized") != nullptr;
+  if (minimized && window_tray_available()) return;
   gtk_widget_show(toplevel);
-  // "--minimized" is passed by the autostart entry (login).
-  if (g_object_get_data(G_OBJECT(toplevel), "start-minimized") != nullptr) {
-    gtk_window_iconify(GTK_WINDOW(toplevel));
-  }
+  if (minimized) gtk_window_iconify(GTK_WINDOW(toplevel));
 }
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  // Already running (e.g. launched again while in the tray): show it.
+  if (self->window != nullptr) {
+    window_tray_present();
+    return;
+  }
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
+  g_object_add_weak_pointer(G_OBJECT(window),
+                            reinterpret_cast<gpointer*>(&self->window));
+  window_tray_init(GTK_APPLICATION(application), window);
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -83,6 +96,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  window_tray_attach_view(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
@@ -151,7 +165,10 @@ MyApplication* my_application_new() {
   // the application to be recognized beyond its binary name.
   g_set_prgname(APPLICATION_ID);
 
+  // Unique: starting the app again shows the running window (it may be
+  // hidden in the tray) instead of opening a second intercom.
   return MY_APPLICATION(g_object_new(my_application_get_type(),
                                      "application-id", APPLICATION_ID, "flags",
-                                     G_APPLICATION_NON_UNIQUE, nullptr));
+                                     static_cast<GApplicationFlags>(0),
+                                     nullptr));
 }
