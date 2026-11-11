@@ -247,6 +247,33 @@ void main() {
     await eventually(() => bobAudio.played.contains(9));
   });
 
+  test('microphone and speaker volume scale the audio', () async {
+    await alice.connect(const PeerTarget('bob-id'));
+    await eventually(() => bob.inConversation);
+    // Alice's mic at 50%: Bob receives half the level.
+    alice.micVolume = 0.5;
+    aliceAudio.inject(voice(1600, 4000));
+    await eventually(() => bobAudio.played.contains(2000));
+    expect(bobAudio.played.contains(4000), isFalse);
+    // Bob's speaker at 200% doubles what he plays.
+    bob.speakerVolume = 2;
+    aliceAudio.inject(voice(1600, 1000));
+    await eventually(() => bobAudio.played.contains(1000)); // 500 * 2
+    // 0% is silent; values are clamped to 0..200%.
+    bob.speakerVolume = 5;
+    expect(bob.speakerVolume, IntercomCore.maxVolume);
+    alice.micVolume = -1;
+    expect(alice.micVolume, 0);
+  });
+
+  test('applyGain clips instead of wrapping around', () {
+    final s = Int16List.fromList([1000, -1000, 30000, -30000, 0]);
+    IntercomCore.applyGain(s, 2);
+    expect(s, [2000, -2000, 32767, -32768, 0]);
+    IntercomCore.applyGain(s, 0);
+    expect(s, [0, 0, 0, 0, 0]);
+  });
+
   group('camera video', () {
     final jpeg = Uint8List.fromList([0xFF, 0xD8, 1, 2, 3, 0xFF, 0xD9]);
 

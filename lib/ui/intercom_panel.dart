@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../src/audio_routes.dart';
 import '../src/intercom_service.dart';
 import '../src/video_call.dart';
+import 'volume_sheet.dart';
 
 /// Main control area: connect / hang up the two-way audio line, accept or
 /// decline when someone rings, mute and speaker controls.
@@ -232,6 +233,7 @@ class IntercomPanel extends StatelessWidget {
                     )
                   : null,
             ),
+            VolumeButton(service: service),
             if (Platform.isAndroid) const AudioOutputButton(),
             if (connected.isNotEmpty && video != null && VideoCall.supported)
               CameraButtons(video: video!, onMessage: onMessage),

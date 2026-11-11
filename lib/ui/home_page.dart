@@ -13,6 +13,7 @@ import 'intercom_panel.dart';
 import 'peer_dialog.dart';
 import 'peer_list.dart';
 import 'video_view.dart';
+import 'volume_sheet.dart';
 
 /// Main window.
 ///
@@ -425,6 +426,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     tooltip: 'Add peer by IP',
                     onPressed: _addPeerDialog,
                     icon: const Icon(Icons.add_link),
+                  ),
+                  ListenableBuilder(
+                    listenable: service,
+                    builder: (context, _) => IconButton(
+                      tooltip: 'Volume',
+                      onPressed: () => showVolumeSheet(context, service),
+                      icon: Icon(speakerIcon(service.speakerVolume)),
+                    ),
                   ),
                   IconButton(
                     tooltip: 'Settings',

@@ -18,6 +18,8 @@ Future<void> main() async {
     autoAnswer: settings.autoAnswer,
     videoReceive: true,
     password: settings.password,
+    speakerVolume: settings.speakerVolume,
+    micVolume: settings.micVolume,
     echoSuppression: settings.echoSuppression,
     savedPeers: settings.savedPeers,
     onSavedPeersChanged: (list) => settings.savedPeers = list,
@@ -29,6 +31,15 @@ Future<void> main() async {
   if (WindowBridge.supported || Platform.isAndroid) {
     _mirrorStatusOutsideApp(service);
   }
+  // Remember volume changes (sliders in the call screen / app bar).
+  service.addListener(() {
+    if (settings.speakerVolume != service.speakerVolume) {
+      settings.speakerVolume = service.speakerVolume;
+    }
+    if (settings.micVolume != service.micVolume) {
+      settings.micVolume = service.micVolume;
+    }
+  });
   runApp(IntercomApp(service: service, settings: settings));
 }
 

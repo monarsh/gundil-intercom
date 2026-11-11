@@ -62,6 +62,8 @@ Future<void> main(List<String> args) async {
     autoAnswer: cfg.flag('auto-answer', fallback: true),
     echoSuppression: cfg.flag('echo-suppression', fallback: true),
     password: cfg.str('password') ?? '',
+    speakerVolume: (cfg.integer('speaker-volume') ?? 100) / 100,
+    micVolume: (cfg.integer('mic-volume') ?? 100) / 100,
     savedPeers: saved,
     onSavedPeersChanged: (list) => state.save(saved: list),
   );

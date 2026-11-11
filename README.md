@@ -56,6 +56,13 @@ call, Android, Windows and Linux can also turn on their **camera** for video.
   `node.conf`) on every device: then only intercoms with that password can
   connect at all; one with another password shows *Different intercom
   password*.
+- **Volume**: adjust the **speaker** (how loud the other side plays) and
+  the **microphone** (how loud you are heard) from 0 to 200%, any time:
+  the 🔊 button in the app bar, or the volume button during a call. Changes
+  apply at once and are remembered. Above 100% boosts quiet audio. Works on
+  Android, Windows and Linux; on the headless node use `speaker-volume` /
+  `mic-volume` in `node.conf`. (The device's own volume keys still work
+  too.)
 - **Mute** and a call timer.
 - **Android audio output picker**: during a call, tap the output button to
   switch between **Speaker**, **Phone (earpiece)**, a **Bluetooth headset**

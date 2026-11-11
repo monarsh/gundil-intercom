@@ -83,6 +83,12 @@ class Settings {
   String get password => _prefs.getString('${_p}password') ?? '';
   set password(String v) => _prefs.setString('${_p}password', v);
 
+  /// Speaker and microphone volume (1 = 100%, up to 2 = 200%).
+  double get speakerVolume => _prefs.getDouble('${_p}speakerVolume') ?? 1;
+  set speakerVolume(double v) => _prefs.setDouble('${_p}speakerVolume', v);
+  double get micVolume => _prefs.getDouble('${_p}micVolume') ?? 1;
+  set micVolume(double v) => _prefs.setDouble('${_p}micVolume', v);
+
   /// Windows: minimize / close hide the window to the system tray.
   bool get minimizeToTray => _prefs.getBool('${_p}minimizeToTray') ?? true;
   set minimizeToTray(bool v) => _prefs.setBool('${_p}minimizeToTray', v);

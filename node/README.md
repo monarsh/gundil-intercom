@@ -131,6 +131,7 @@ Edit `/etc/gundil-intercom/node.conf`, then
 | `target` | `everyone`, or the name of the intercom the button connects to |
 | `button-gpio`, `button-gpio-active-low` | Button pin (press = connect / accept / hang up) |
 | `led-gpio` | Optional LED pin |
+| `speaker-volume`, `mic-volume` | Volume in percent, 0–200 (default 100). Above 100 boosts quiet audio |
 | `echo-suppression` | Lower the mic while the other side talks (default `true`). Turn off with a headset or an echo-cancelling USB speakerphone |
 | `gpio-backend`, `gpio-chip` | `auto` / `gpiod` / `sysfs`, and the gpiochip for gpiod |
 | `button-input`, `button-key` | Use a USB keyboard/foot pedal key as the button |

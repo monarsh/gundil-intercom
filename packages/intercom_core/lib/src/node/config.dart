@@ -20,6 +20,10 @@ class NodeConfig {
     'auto-answer':
         'Open incoming connections at once (default true). false = ring '
         'and wait for the button / "a"',
+    'speaker-volume':
+        'Speaker volume in percent, 0-200 (default 100). Above 100 boosts '
+        'quiet audio',
+    'mic-volume': 'Microphone volume in percent, 0-200 (default 100)',
     'echo-suppression':
         'Lower the mic while the other side talks (default true)',
     'password':

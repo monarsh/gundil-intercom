@@ -21,6 +21,11 @@ target = everyone
 button-gpio = 6
 button-gpio-active-low = true
 
+# Volume in percent (0-200, default 100). Above 100 boosts quiet audio
+# (may distort). The board's own mixer (alsamixer) still applies too.
+#speaker-volume = 100
+#mic-volume = 100
+
 # Lowers the microphone while the other side talks, so they don't hear
 # their own voice echoed back from this speaker. Turn off with a headset.
 echo-suppression = true

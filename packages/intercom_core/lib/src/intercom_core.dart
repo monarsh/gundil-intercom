@@ -88,6 +88,8 @@ class IntercomCore {
     this.autoAnswer = true,
     this.videoReceive = false,
     String password = '',
+    double speakerVolume = 1,
+    double micVolume = 1,
     bool? echoSuppression,
     List<SavedPeer> savedPeers = const [],
     this.onSavedPeersChanged,
@@ -95,6 +97,8 @@ class IntercomCore {
     this.hooks = const PlatformHooks(),
   }) : _name = name, // ignore: prefer_initializing_formals
        _password = password,
+       _speakerVolume = speakerVolume.clamp(0.0, maxVolume),
+       _micVolume = micVolume.clamp(0.0, maxVolume),
        _saved = [...savedPeers],
        // Android uses the phone's hardware echo canceller instead.
        echoSuppression = echoSuppression ?? !Platform.isAndroid,
@@ -177,6 +181,8 @@ class IntercomCore {
 
   String _name;
   String _password;
+  double _speakerVolume;
+  double _micVolume;
   Uint8List _secret = networkSecret('');
   double _micLevel = 0;
   bool _audioReady = false;
@@ -273,6 +279,29 @@ class IntercomCore {
   /// Whether we are talking (microphone above the voice threshold).
   bool get selfSpeaking =>
       _audioRunning && !_muted && _micLevel >= speakingThreshold;
+
+  /// Highest volume setting: 2 = 200% (twice as loud, may distort).
+  static const double maxVolume = 2;
+
+  /// How loud the other side plays here: 0 = silent, 1 = as received
+  /// (100%), up to [maxVolume]. Takes effect at once.
+  double get speakerVolume => _speakerVolume;
+  set speakerVolume(double v) {
+    final c = v.clamp(0.0, maxVolume);
+    if (c == _speakerVolume) return;
+    _speakerVolume = c;
+    changed();
+  }
+
+  /// How loud our microphone is sent: 0 = silent, 1 = as captured (100%),
+  /// up to [maxVolume]. Takes effect at once.
+  double get micVolume => _micVolume;
+  set micVolume(double v) {
+    final c = v.clamp(0.0, maxVolume);
+    if (c == _micVolume) return;
+    _micVolume = c;
+    changed();
+  }
 
   /// Security code of the encrypted link to [peerId] ("123 456"), the same
   /// on both devices unless someone intercepts the connection.
@@ -1093,7 +1122,7 @@ class IntercomCore {
     if (first) {
       conv.connectedAt = DateTime.now();
       _startAudio();
-      if (rogerBeep && _audioRunning) audio.play(connectTone(sampleRate));
+      if (rogerBeep && _audioRunning) _playTone(connectTone(sampleRate));
     }
     _emit(
       '${displayName(id)} connected',
@@ -1142,7 +1171,7 @@ class IntercomCore {
   }) {
     _stopRinging();
     if (_audioRunning && rogerBeep) {
-      audio.play(hangupTone(sampleRate));
+      _playTone(hangupTone(sampleRate));
       // Let the tone play out before closing the devices, unless a new
       // conversation has connected meanwhile (switching peers).
       Timer(const Duration(milliseconds: 300), () {
@@ -1374,6 +1403,7 @@ class IntercomCore {
     if (want > 0) {
       final mixed = _mixer.take(want);
       if (mixed != null) {
+        applyGain(mixed, _speakerVolume);
         audio.play(mixed);
         if (echoSuppression) _echo.onPlayback(mixed);
         _speakerLevel = rmsLevel(mixed);
@@ -1390,6 +1420,8 @@ class IntercomCore {
           _micLevel = 0;
         } else {
           if (echoSuppression) _echo.process(mic);
+          // After echo suppression, which compares the raw mic level.
+          applyGain(mic, _micVolume);
           _micLevel = rmsLevel(mic);
           final frame = Frame(MessageType.audio, pcmToBytes(mic));
           for (final id in conv.connected) {
@@ -1409,7 +1441,11 @@ class IntercomCore {
     } catch (_) {
       return;
     }
-    void ring() => audio.play(ringTone(sampleRate));
+    // Never quieter than half volume, so a call can't be missed.
+    void ring() => _playTone(
+      ringTone(sampleRate),
+      gain: math.max(_speakerVolume, 0.5),
+    );
     ring();
     _ringTimer = Timer.periodic(const Duration(seconds: 2), (_) => ring());
   }
@@ -1426,6 +1462,22 @@ class IntercomCore {
   }
 
   // ---------------------------------------------------------------- helpers
+
+  /// Plays a tone at the speaker volume (or [gain]).
+  void _playTone(Int16List tone, {double? gain}) {
+    applyGain(tone, gain ?? _speakerVolume);
+    audio.play(tone);
+  }
+
+  /// Scales [samples] in place by [gain], clipping to 16 bit.
+  static void applyGain(Int16List samples, double gain) {
+    if (gain == 1) return;
+    final g = (gain * 4096).round(); // Fixed point, 12 bits.
+    for (var i = 0; i < samples.length; i++) {
+      final v = (samples[i] * g) >> 12;
+      samples[i] = v > 32767 ? 32767 : (v < -32768 ? -32768 : v);
+    }
+  }
 
   /// RMS level of [samples] normalised to 0..1 on a perceptual (dB) scale.
   static double rmsLevel(Int16List samples) {
