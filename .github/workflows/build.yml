@@ -190,6 +190,7 @@ jobs:
           : > release-notes.md
           if [ -f ".github/release/changelog/$TAG.md" ]; then
             cat ".github/release/changelog/$TAG.md" >> release-notes.md
+            echo >> release-notes.md   # Keep it a separate paragraph.
           fi
           sed "s/VERSION/$V/g" .github/release/notes.md >> release-notes.md
           ls -la dist
@@ -201,3 +202,5 @@ jobs:
           body_path: release-notes.md
           files: dist/*
           fail_on_unmatched_files: true
+          # Maintenance branch (1.1.x): keep the newest version as "Latest".
+          make_latest: false
