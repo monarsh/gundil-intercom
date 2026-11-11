@@ -134,8 +134,9 @@ void main() {
     // Once they share the password, it connects.
     await bob.setPassword('one');
     expect(bob.password, 'one');
+    alice.removeSavedPeer(alice.savedPeers.single.key);
     expect(
-      await alice.addSavedPeer(host: 'localhost', port: bob.listenPort!),
+      await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
       isTrue,
     );
     await alice.connect(const PeerTarget('bob-id'));
