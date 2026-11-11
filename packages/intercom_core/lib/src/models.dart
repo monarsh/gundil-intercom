@@ -18,6 +18,21 @@ class Peer {
   InternetAddress address;
   int port;
 
+  /// Addresses the peer was recently seen at, newest first: it can be
+  /// reachable several ways (LAN, Tailscale, WireGuard, ...), and after a
+  /// network switch only some of them still work. Tried in turn when
+  /// connecting.
+  final List<(InternetAddress, int)> endpoints = [];
+
+  /// Remembers [address]:[port] as the newest way to reach the peer.
+  void noteEndpoint(InternetAddress address, int port) {
+    endpoints.removeWhere((e) => e.$1 == address && e.$2 == port);
+    endpoints.insert(0, (address, port));
+    if (endpoints.length > maxEndpoints) endpoints.removeLast();
+  }
+
+  static const int maxEndpoints = 4;
+
   /// Last time we heard a discovery beacon from this peer.
   DateTime? lastBeacon;
 

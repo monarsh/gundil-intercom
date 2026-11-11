@@ -120,6 +120,8 @@ class PeerList extends StatelessWidget {
           Flexible(
             child: Text(
               switch (state) {
+                MemberState.connected when service.isReconnecting(id!) =>
+                  'Reconnecting…',
                 MemberState.connected when service.isSpeaking(id!) =>
                   'Speaking…',
                 MemberState.connected => 'Connected',

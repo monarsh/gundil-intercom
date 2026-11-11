@@ -59,6 +59,14 @@ class Discovery {
 
   Future<void> start() async {
     if (_socket != null) return;
+    await _bind();
+    _timer ??= Timer.periodic(interval, (_) {
+      if (++_tick % 15 == 0) _refreshTargets();
+      _announce();
+    });
+  }
+
+  Future<void> _bind() async {
     final socket = await RawDatagramSocket.bind(
       InternetAddress.anyIPv4,
       port,
@@ -66,16 +74,47 @@ class Discovery {
       reusePort: Platform.isLinux || Platform.isAndroid || Platform.isMacOS,
     );
     socket.broadcastEnabled = true;
-    socket.listen((event) {
-      if (event == RawSocketEvent.read) _read(socket);
-    });
+    socket.listen(
+      (event) {
+        if (event == RawSocketEvent.read) _read(socket);
+        if (event == RawSocketEvent.closed) _lost(socket);
+      },
+      onError: (Object _) => _lost(socket),
+      onDone: () => _lost(socket),
+    );
     _socket = socket;
     await _refreshTargets();
     _announce();
-    _timer = Timer.periodic(interval, (_) {
-      if (++_tick % 15 == 0) _refreshTargets();
-      _announce();
+  }
+
+  /// The system closed the socket under us (the network went away on some
+  /// phones): bind a new one.
+  void _lost(RawDatagramSocket s) {
+    if (!identical(_socket, s) || _timer == null) return;
+    _socket = null;
+    s.close();
+    Future<void>.delayed(const Duration(seconds: 1), () async {
+      if (_socket != null || _timer == null) return;
+      try {
+        await _bind();
+      } catch (_) {
+        // No network right now; [restart] tries again on the next change.
+      }
     });
+  }
+
+  /// After a network change: a fresh socket, the new interfaces' broadcast
+  /// addresses, and a beacon right away so peers see us at once.
+  Future<void> restart() async {
+    if (_timer == null) return start();
+    final old = _socket;
+    _socket = null;
+    old?.close();
+    try {
+      await _bind();
+    } catch (_) {
+      // No network right now; tried again on the next change.
+    }
   }
 
   /// Sends an immediate beacon (e.g. after a name change).

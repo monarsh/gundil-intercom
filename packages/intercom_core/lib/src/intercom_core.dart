@@ -158,8 +158,28 @@ class IntercomCore {
   static const Duration ringTimeout = Duration(seconds: 30);
 
   /// A connected member we hear nothing from (not even pings) for this long
-  /// is dropped (crashed, out of Wi-Fi range, ...).
-  static const Duration memberTimeout = Duration(seconds: 8);
+  /// is dropped (crashed, out of Wi-Fi range, ...). Until then the call
+  /// stays up and the link is redialled (see [relinkAfter]), so switching
+  /// networks (Wi-Fi ⇄ mobile data, VPN on/off) doesn't end the call.
+  static const Duration memberTimeout = Duration(seconds: 15);
+
+  /// In a call, a member silent for this long (pings go every second) is
+  /// dialled again on a new connection; shown as "Reconnecting…".
+  static const Duration relinkAfter = Duration(seconds: 3);
+
+  /// Idle links are pinged when nothing arrived for this long...
+  static const Duration linkPingInterval = Duration(seconds: 5);
+
+  /// ...and closed when nothing arrived for this long. A link whose network
+  /// went away doesn't fail by itself (TCP gives up after many minutes); it
+  /// just goes silent, and the peer would look online forever.
+  static const Duration linkTimeout = Duration(seconds: 15);
+
+  /// After a network change every link must answer within this long.
+  static const Duration probeTimeout = Duration(seconds: 4);
+
+  /// How often the network interfaces are checked for changes.
+  static const Duration networkCheckInterval = Duration(seconds: 2);
 
   /// Incoming level (see [rmsLevel], 0..1 ≈ -60..0 dBFS) counted as voice.
   static const double speakingThreshold = 0.38;
@@ -192,6 +212,11 @@ class IntercomCore {
   Discovery? _discovery;
   Timer? _housekeeping;
   Timer? _reconnect;
+  Timer? _netWatch;
+  String? _netFingerprint;
+  Set<String> _localAddresses = {};
+  bool _netChecking = false;
+  final Set<String> _relinking = {};
 
   final List<SavedPeer> _saved;
   final Set<String> _savedConnecting = {};
@@ -268,6 +293,17 @@ class IntercomCore {
   bool isSpeaking(String peerId) {
     final at = _voiceAt[peerId];
     return at != null && DateTime.now().difference(at) < speakingHold;
+  }
+
+  /// Call member [peerId] went quiet (its network changed?) and is being
+  /// reconnected; the call continues once it's back.
+  bool isReconnecting(String peerId) {
+    final conv = _conversation;
+    if (conv == null || conv.members[peerId] != MemberState.connected) {
+      return false;
+    }
+    final heard = conv.lastHeard[peerId];
+    return heard != null && DateTime.now().difference(heard) > relinkAfter;
   }
 
   /// Connected peers that are talking right now.
@@ -401,17 +437,7 @@ class IntercomCore {
 
   Future<void> start() async {
     _secret = await _deriveSecret(_password);
-    try {
-      _server = await ServerSocket.bind(InternetAddress.anyIPv4, preferredPort);
-    } on SocketException {
-      // Port taken (e.g. second instance on the same machine): use any port.
-      // Discovery advertises the real port, so peers still find us.
-      _server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
-    }
-    _server!.listen(
-      (s) => _adopt(PeerConnection(s, outgoing: false, secret: _secret)),
-      onError: (Object e) => _emit('Server error: $e', error: true),
-    );
+    await _bindServer(preferredPort);
 
     if (enableDiscovery) {
       await hooks.acquireMulticastLock();
@@ -422,9 +448,10 @@ class IntercomCore {
         port: discoveryUdpPort,
       );
       d.beacons.listen(_onBeacon);
+      // Kept even if it can't start now: retried when the network changes.
+      _discovery = d;
       try {
         await d.start();
-        _discovery = d;
       } on SocketException catch (e) {
         _emit(
           'LAN discovery unavailable (${e.message}). '
@@ -436,11 +463,333 @@ class IntercomCore {
 
     _housekeeping = Timer.periodic(const Duration(seconds: 1), (_) {
       _checkConversation();
+      _keepLinksAlive();
       changed();
     });
     _reconnect = Timer.periodic(reconnectInterval, (_) => _retrySaved());
+    _netWatch = Timer.periodic(networkCheckInterval, (_) => _checkNetwork());
+    await _checkNetwork();
     _retrySaved();
     changed();
+  }
+
+  /// Listens for peers on [port] (any free port if it's taken, e.g. a
+  /// second instance on the same machine; discovery and HELLO advertise the
+  /// real port, so peers still find us).
+  Future<void> _bindServer(int port) async {
+    ServerSocket server;
+    try {
+      server = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    } on SocketException {
+      server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
+    }
+    _server = server;
+    final boundPort = server.port;
+    server.listen(
+      (s) => _adopt(PeerConnection(s, outgoing: false, secret: _secret)),
+      onError: (Object e) => log('Server error: $e'),
+      onDone: () => _serverClosed(server, boundPort),
+    );
+  }
+
+  /// The system closed our listening socket (some phones do when the
+  /// network goes away): open it again, so peers can still call us.
+  void _serverClosed(ServerSocket server, int port) {
+    if (_shutDown || !identical(_server, server)) return;
+    log('Listening socket closed; opening it again');
+    Future<void>.delayed(const Duration(seconds: 1), () async {
+      if (_shutDown || !identical(_server, server)) return;
+      try {
+        await _bindServer(port);
+      } catch (e) {
+        log('Could not listen again: $e');
+        return;
+      }
+      final now = _server!.port;
+      if (now != port) {
+        _discovery?.tcpPort = now;
+        _discovery?.announceNow();
+        for (final c in _links.values) {
+          c.send(_hello());
+        }
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------- network
+
+  /// Notices network switches (Wi-Fi ⇄ mobile data, another Wi-Fi, a VPN
+  /// such as WireGuard, OpenVPN or Tailscale going up or down) by watching
+  /// the device's IPv4 addresses.
+  Future<void> _checkNetwork() async {
+    if (_netChecking || _shutDown) return;
+    _netChecking = true;
+    try {
+      final ifaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+      );
+      final addresses = {
+        for (final i in ifaces)
+          for (final a in i.addresses) a.address,
+      };
+      final fingerprint = ([
+        for (final i in ifaces)
+          '${i.name}=${i.addresses.map((a) => a.address).join(',')}',
+      ]..sort()).join(';');
+      if (fingerprint == _netFingerprint) return;
+      final first = _netFingerprint == null;
+      _netFingerprint = fingerprint;
+      _localAddresses = addresses;
+      if (!first && !_shutDown) networkChanged();
+    } catch (e) {
+      log('Could not list network interfaces: $e');
+    } finally {
+      _netChecking = false;
+    }
+  }
+
+  /// The network changed (also called by the platform when it knows
+  /// first). Does what restarting the app used to: drops links that can't
+  /// work any more, makes the others prove they still do, restarts LAN
+  /// discovery on the new network and reconnects saved peers and call
+  /// members right away.
+  void networkChanged() {
+    if (_shutDown) return;
+    log('Network changed (${_localAddresses.join(', ')}): reconnecting');
+    final now = DateTime.now();
+    for (final c in _allConnections.toList()) {
+      if (c.isClosed) continue;
+      final local = c.localAddress;
+      if (local != null &&
+          !local.isLoopback &&
+          _localAddresses.isNotEmpty &&
+          !_localAddresses.contains(local.address)) {
+        // Our end of it is gone: it can never work again.
+        c.close();
+        continue;
+      }
+      if (!c.verified || c.legacy) continue;
+      // Routes may have moved (e.g. into a VPN): it must answer quickly.
+      c.probeDeadline = now.add(probeTimeout);
+      c.lastPing = now;
+      c.send(Frame.empty(MessageType.ping));
+    }
+    // In a call, dial the members again at once instead of waiting for the
+    // old links to fail: the call continues on whichever answers first.
+    for (final id in _conversation?.connected.toList() ?? const <String>[]) {
+      _relink(id);
+    }
+    _restartDiscovery();
+    // Give the new network a moment (DHCP, VPN handshake), then reconnect.
+    for (final delay in const [Duration(seconds: 1), Duration(seconds: 5)]) {
+      Future<void>.delayed(delay, () {
+        if (!_shutDown) _reconnectNow();
+      });
+    }
+    changed();
+  }
+
+  Future<void> _restartDiscovery() async {
+    final d = _discovery;
+    if (d == null) return;
+    try {
+      // Android ties the multicast lock to the Wi-Fi it was taken on.
+      await hooks.releaseMulticastLock();
+      await hooks.acquireMulticastLock();
+    } catch (_) {}
+    if (_shutDown) return;
+    try {
+      if (d.running) {
+        await d.restart();
+      } else {
+        await d.start();
+      }
+    } catch (e) {
+      log('LAN discovery not available yet: $e');
+    }
+  }
+
+  void _reconnectNow() {
+    _retrySaved();
+    final conv = _conversation;
+    if (conv == null) return;
+    for (final id in conv.connected.toList()) {
+      if (!_linkAlive(id)) _relink(id);
+    }
+  }
+
+  /// [id] has a link that delivered something recently.
+  bool _linkAlive(String id) {
+    final link = _links[id];
+    return link != null &&
+        !link.isClosed &&
+        link.probeDeadline == null &&
+        DateTime.now().difference(link.lastReceived) < relinkAfter;
+  }
+
+  /// Pings quiet links and closes the ones that stopped answering.
+  void _keepLinksAlive() {
+    final now = DateTime.now();
+    for (final c in _allConnections.toList()) {
+      if (c.isClosed || c.legacy || !c.verified) continue;
+      final probe = c.probeDeadline;
+      final quiet = now.difference(c.lastReceived);
+      if ((probe != null && now.isAfter(probe)) || quiet > linkTimeout) {
+        log(
+          'Link to ${c.remoteId ?? c.remoteAddress.address} stopped '
+          'answering; closing it',
+        );
+        c.close();
+        continue;
+      }
+      final last = c.lastPing;
+      if (quiet >= linkPingInterval &&
+          (last == null || now.difference(last) >= linkPingInterval)) {
+        c.lastPing = now;
+        c.send(Frame.empty(MessageType.ping));
+      }
+    }
+  }
+
+  /// Call member [id] has gone quiet or its link broke (network switch):
+  /// dials it again until it answers, the call ends, or [memberTimeout]
+  /// drops it. The call stays up meanwhile and continues on the new link.
+  Future<void> _relink(String id) async {
+    if (_shutDown || !_relinking.add(id)) return;
+    try {
+      while (!_shutDown) {
+        final conv = _conversation;
+        if (conv == null || conv.members[id] != MemberState.connected) return;
+        final p = _peers[id];
+        if (p == null || _linkAlive(id)) return;
+        final old = _links[id];
+        try {
+          final conn = await _dial(p);
+          final hello = Completer<String>();
+          _adopt(
+            conn,
+            onHello: (got) {
+              if (!hello.isCompleted) hello.complete(got);
+            },
+          );
+          final failed = conn.done.then<String>(
+            (_) => throw LinkException(conn.failure ?? LinkFailure.closed),
+          );
+          final got = await Future.any([
+            hello.future,
+            failed,
+          ]).timeout(const Duration(seconds: 6));
+          if (got != id) {
+            conn.close(); // Another device has that address now.
+          } else {
+            _links[id] = conn;
+            p.connected = true;
+            if (old != null && !identical(old, conn)) old.close();
+            log('Reconnected to ${displayName(id)}');
+            changed();
+            return;
+          }
+        } on _Refused {
+          // The address answers but nothing listens: its app was closed.
+          if (!_linkAlive(id) &&
+              (_conversation?.members[id] == MemberState.connected)) {
+            _removeMember(id, reason: 'Lost connection to ${displayName(id)}');
+          }
+          return;
+        } catch (_) {
+          // Not reachable (yet); try again shortly.
+        }
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+    } finally {
+      _relinking.remove(id);
+    }
+  }
+
+  /// Opens a link to [p], trying every address it was seen at (and the
+  /// saved one), a little apart so the newest wins when several work.
+  Future<PeerConnection> _dial(Peer p) async {
+    final out = <(InternetAddress, int)>[];
+    void add(InternetAddress a, int port) {
+      if (a.type != InternetAddressType.IPv4) return; // We listen on IPv4.
+      if (!out.any((e) => e.$1 == a && e.$2 == port)) out.add((a, port));
+    }
+
+    add(p.address, p.port);
+    for (final e in p.endpoints) {
+      add(e.$1, e.$2);
+    }
+    for (final s in _saved.where((s) => s.peerId == p.id)) {
+      for (final a in await _lookup(s.host)) {
+        add(a, s.port);
+      }
+    }
+    return _connectAny(out);
+  }
+
+  /// IPv4 addresses of [host] (an IP address or a name, e.g. a Tailscale
+  /// MagicDNS name); empty when it can't be resolved now.
+  static Future<List<InternetAddress>> _lookup(String host) async {
+    final ip = InternetAddress.tryParse(host);
+    if (ip != null) return [ip];
+    try {
+      return await InternetAddress.lookup(
+        host,
+        type: InternetAddressType.IPv4,
+      ).timeout(const Duration(seconds: 3));
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Connects to the first of [endpoints] that answers. They're tried a
+  /// little apart, without waiting for a dead one to time out. Throws
+  /// [_Refused] if every one refused (the device is there, the app isn't).
+  Future<PeerConnection> _connectAny(List<(InternetAddress, int)> endpoints) {
+    if (endpoints.isEmpty) {
+      return Future.error(const SocketException('No address to connect to'));
+    }
+    final result = Completer<PeerConnection>();
+    var left = endpoints.length;
+    var refused = 0;
+    Object lastError = const SocketException('Unreachable');
+    for (var i = 0; i < endpoints.length; i++) {
+      final (address, port) = endpoints[i];
+      Future<void>.delayed(Duration(milliseconds: 500 * i), () async {
+        try {
+          if (result.isCompleted) return;
+          final c = await PeerConnection.connect(
+            address,
+            port,
+            secret: _secret,
+            timeout: const Duration(seconds: 3),
+          );
+          if (result.isCompleted || _shutDown) {
+            c.close();
+          } else {
+            result.complete(c);
+          }
+        } catch (e) {
+          lastError = e;
+          if (_isRefused(e)) refused++;
+        } finally {
+          if (--left == 0 && !result.isCompleted) {
+            result.completeError(
+              refused == endpoints.length ? _Refused(lastError) : lastError,
+            );
+          }
+        }
+      });
+    }
+    return result.future;
+  }
+
+  static bool _isRefused(Object e) {
+    if (e is! SocketException) return false;
+    final code = e.osError?.errorCode;
+    // ECONNREFUSED: Linux/Android 111, macOS 61, Windows WSAECONNREFUSED.
+    return code == 111 || code == 61 || code == 10061;
   }
 
   /// Stops transmitting, closes every socket and releases resources.
@@ -452,6 +801,7 @@ class IntercomCore {
     _stopAudio();
     _housekeeping?.cancel();
     _reconnect?.cancel();
+    _netWatch?.cancel();
     await _discovery?.dispose();
     await hooks.releaseMulticastLock();
     for (final c in _allConnections.toList()) {
@@ -593,16 +943,9 @@ class IntercomCore {
     if (_shutDown || !_savedConnecting.add(s.key)) return false;
     PeerConnection? conn;
     try {
-      final addrs = await InternetAddress.lookup(
-        s.host,
-      ).timeout(const Duration(seconds: 3));
+      final addrs = await _lookup(s.host);
       if (addrs.isEmpty) return false;
-      conn = await PeerConnection.connect(
-        addrs.first,
-        s.port,
-        secret: _secret,
-        timeout: const Duration(seconds: 3),
-      );
+      conn = await _connectAny([for (final a in addrs) (a, s.port)]);
       if (_shutDown) {
         conn.close();
         return false;
@@ -662,6 +1005,7 @@ class IntercomCore {
       final isIp = InternetAddress.tryParse(s.host) != null;
       if (isIp &&
           p.online &&
+          _sameNetwork(s.host, p.address.address) &&
           (s.host != p.address.address || s.port != p.port) &&
           !_saved.any(
             (o) => o != s && o.host == p.address.address && o.port == p.port,
@@ -672,6 +1016,15 @@ class IntercomCore {
       }
     }
     if (updated) _savedChanged();
+  }
+
+  /// Whether two IPv4 addresses look like the same network (a new DHCP
+  /// lease) rather than two routes to the device — a LAN address must not
+  /// replace a saved VPN address (or the other way round), or the peer
+  /// can't be reached any more once the user leaves that LAN.
+  static bool _sameNetwork(String a, String b) {
+    final x = a.split('.'), y = b.split('.');
+    return x.length == 4 && y.length == 4 && x[0] == y[0] && x[1] == y[1];
   }
 
   void _onBeacon(DiscoveryBeacon b) {
@@ -712,6 +1065,7 @@ class IntercomCore {
         ..platform = platform
         ..address = address
         ..port = port;
+      existing.noteEndpoint(address, port);
       if (differs) changed();
       _resolveSaved(existing);
       return existing;
@@ -722,7 +1076,7 @@ class IntercomCore {
       platform: platform,
       address: address,
       port: port,
-    );
+    )..noteEndpoint(address, port);
     _peers[id] = p;
     _resolveSaved(p);
     changed();
@@ -752,11 +1106,7 @@ class IntercomCore {
     if (existing != null && !existing.isClosed) return Future.value(existing);
     return _connecting[p.id] ??= () async {
       try {
-        final conn = await PeerConnection.connect(
-          p.address,
-          p.port,
-          secret: _secret,
-        );
+        final conn = await _dial(p);
         conn.remoteId = p.id;
         _links[p.id] = conn;
         p.connected = true;
@@ -792,10 +1142,22 @@ class IntercomCore {
       _peers[id]?.connected = alt != null;
       // A link that never worked (e.g. wrong password) was never used for
       // the call: the caller ([connect]) reports why it failed.
-      if (alt == null &&
-          c.verified &&
-          (_conversation?.members.containsKey(id) ?? false)) {
-        _removeMember(id, reason: 'Lost connection to ${displayName(id)}');
+      final state = _conversation?.members[id];
+      if (alt == null && c.verified && state != null) {
+        if (state == MemberState.connected) {
+          // Most likely the network changed: keep the call and dial again
+          // ([memberTimeout] ends it if that doesn't work).
+          _relink(id);
+        } else {
+          _removeMember(id, reason: 'Lost connection to ${displayName(id)}');
+        }
+      } else if (alt == null && c.verified) {
+        // Reconnect a saved peer right away rather than at the next retry.
+        Future<void>.delayed(const Duration(milliseconds: 500), () {
+          for (final s in _saved.where((s) => s.peerId == id).toList()) {
+            if (!(_peers[id]?.connected ?? false)) _tryConnectSaved(s);
+          }
+        });
       }
     }
     changed();
@@ -833,8 +1195,10 @@ class IntercomCore {
         address: c.remoteAddress,
         port: (m['port'] as int?) ?? defaultTcpPort,
       );
-      final current = _links[id];
-      if (current == null || current.isClosed) _links[id] = c;
+      // The newest link wins: after a network switch the peer dials us
+      // again while the old link may still look open here (it's dead, and
+      // is closed once it stops answering pings).
+      if (!c.isClosed) _links[id] = c;
       p.connected = true;
       p.version = (m['v'] as int?) ?? 1;
       p.video = m['video'] == true;
@@ -1220,7 +1584,9 @@ class IntercomCore {
           }
         case MemberState.connected:
           _send(id, Frame.empty(MessageType.ping));
-          if (now.difference(conv.lastHeard[id] ?? now) > memberTimeout) {
+          final quiet = now.difference(conv.lastHeard[id] ?? now);
+          if (quiet > relinkAfter && quiet <= memberTimeout) _relink(id);
+          if (quiet > memberTimeout) {
             _removeMember(id, reason: 'Lost connection to ${displayName(id)}');
           }
       }
@@ -1442,10 +1808,8 @@ class IntercomCore {
       return;
     }
     // Never quieter than half volume, so a call can't be missed.
-    void ring() => _playTone(
-      ringTone(sampleRate),
-      gain: math.max(_speakerVolume, 0.5),
-    );
+    void ring() =>
+        _playTone(ringTone(sampleRate), gain: math.max(_speakerVolume, 0.5));
     ring();
     _ringTimer = Timer.periodic(const Duration(seconds: 2), (_) => ring());
   }
@@ -1535,4 +1899,14 @@ class IntercomCore {
     if (e is TimeoutException) return e.message ?? 'timed out';
     return e.toString();
   }
+}
+
+/// Every address of a peer refused the connection: the device is there but
+/// the intercom isn't running on it.
+class _Refused implements Exception {
+  _Refused(this.error);
+  final Object error;
+
+  @override
+  String toString() => '$error';
 }

@@ -165,7 +165,11 @@ class IntercomPanel extends StatelessWidget {
       final mm = d.inMinutes.toString().padLeft(2, '0');
       final ss = (d.inSeconds % 60).toString().padLeft(2, '0');
       timer = 'Connected · $mm:$ss';
-      if (speakers.isNotEmpty) {
+      final lost = connected.where(service.isReconnecting).toList();
+      if (lost.length == connected.length) {
+        // Their network (or ours) just changed: the call resumes by itself.
+        status = 'Reconnecting to ${lost.map(service.displayName).join(', ')}…';
+      } else if (speakers.isNotEmpty) {
         final names = speakers.map(service.displayName).toList();
         status = names.length == 1
             ? '${names.single} is speaking'

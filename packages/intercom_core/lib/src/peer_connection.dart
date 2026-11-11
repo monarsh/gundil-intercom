@@ -48,7 +48,8 @@ class LinkException implements Exception {
 class PeerConnection {
   PeerConnection(this.socket, {required this.outgoing, required this.secret})
     : remoteAddress = socket.remoteAddress,
-      remotePort = socket.remotePort {
+      remotePort = socket.remotePort,
+      localAddress = _localAddress(socket) {
     try {
       socket.setOption(SocketOption.tcpNoDelay, true);
     } catch (_) {}
@@ -87,6 +88,14 @@ class PeerConnection {
   }
 
   static const Duration handshakeTimeout = Duration(seconds: 6);
+
+  static InternetAddress? _localAddress(Socket s) {
+    try {
+      return s.address;
+    } catch (_) {
+      return null;
+    }
+  }
 
   final Socket socket;
 
@@ -144,6 +153,22 @@ class PeerConnection {
   final InternetAddress remoteAddress;
   final int remotePort;
 
+  /// Our own address on this link (null if unknown). When the device loses
+  /// that address (Wi-Fi → mobile data, VPN down, ...) the link is dead.
+  final InternetAddress? localAddress;
+
+  /// Last time anything arrived from the other side. A link that stays
+  /// silent despite pings is dead (e.g. the network changed under it),
+  /// which TCP itself would only notice after many minutes.
+  DateTime lastReceived = DateTime.now();
+
+  /// Last keep-alive ping sent (managed by the engine).
+  DateTime? lastPing;
+
+  /// The engine checks this link after a network change: it's closed unless
+  /// something arrives before this time.
+  DateTime? probeDeadline;
+
   /// Sends [frame] encrypted (queued until the key exchange is done).
   void send(Frame frame) {
     if (_isClosed || _legacy) return;
@@ -172,6 +197,8 @@ class PeerConnection {
   }
 
   void _onData(List<int> data) {
+    lastReceived = DateTime.now();
+    probeDeadline = null;
     try {
       for (final f in _decoder.add(data)) {
         if (_isClosed) return;
