@@ -1,6 +1,6 @@
 Two-way (full-duplex) LAN intercom for **Android, Windows, Linux, Raspberry Pi and Orange Pi PC**.
 Pick an intercom, press **Connect**, and both sides talk and listen at the same time until one hangs up.
-During a call, Android and Windows can turn on their camera for video.
+During a call, Android, Windows and Linux can turn on their camera for video.
 Intercoms find each other automatically on the same Wi-Fi/LAN. No server, no account.
 
 ## Which file do I need?

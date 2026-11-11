@@ -42,8 +42,9 @@ class CameraInfo {
 /// [IntercomService.sendVideoFrame] and are shown as a self-view.
 ///
 /// Capture is native: CameraX on Android (`CameraCapture.kt`), Media
-/// Foundation on Windows (`windows/runner/camera_capture.cpp`). Both deliver
-/// JPEG pictures on the `p2p_intercom/camera/frames` event channel.
+/// Foundation on Windows (`windows/runner/camera_capture.cpp`), V4L2 on Linux
+/// (`linux/runner/camera_capture.cc`). All deliver JPEG pictures on the
+/// `p2p_intercom/camera/frames` event channel.
 class VideoCall extends ChangeNotifier {
   VideoCall(this.service) {
     service.addListener(_onService);
@@ -63,7 +64,8 @@ class VideoCall extends ChangeNotifier {
   /// Sending video is available on these platforms (others still show the
   /// video peers send).
   static bool get supported =>
-      debugSupported ?? (Platform.isAndroid || Platform.isWindows);
+      debugSupported ??
+      (Platform.isAndroid || Platform.isWindows || Platform.isLinux);
 
   /// Tests: pretend the platform has (or lacks) camera support.
   @visibleForTesting

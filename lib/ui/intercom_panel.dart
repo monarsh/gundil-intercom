@@ -574,7 +574,7 @@ class AudioOutputButton extends StatelessWidget {
   }
 }
 
-/// Camera on/off, and switching camera (Android: front ⇄ back; Windows:
+/// Camera on/off, and switching camera (Android: front ⇄ back; Windows/Linux:
 /// choose the built-in or a USB webcam). The camera only turns on when the
 /// user presses the button.
 class CameraButtons extends StatelessWidget {
@@ -614,7 +614,7 @@ class CameraButtons extends StatelessWidget {
                 icon: const Icon(Icons.cameraswitch),
               ),
             ],
-            if (Platform.isWindows) ...[
+            if (Platform.isWindows || Platform.isLinux) ...[
               const SizedBox(width: 8),
               _WebcamMenu(video: video, run: _run),
             ],
@@ -630,7 +630,7 @@ class CameraButtons extends StatelessWidget {
   }
 }
 
-/// Windows: pick which webcam to use (built-in, USB, ...).
+/// Windows/Linux: pick which webcam to use (built-in, USB, ...).
 class _WebcamMenu extends StatelessWidget {
   const _WebcamMenu({required this.video, required this.run});
 

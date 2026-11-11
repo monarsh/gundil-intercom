@@ -5,7 +5,7 @@ A serverless, peer-to-peer **two-way audio intercom over TCP/IP** for
 to and press **Connect**: both sides talk and listen at the same time, like a
 phone call, until one of you hangs up. Intercoms answer automatically, like a
 door station; you can turn that off to ring and accept instead. During a
-call, Android and Windows can also turn on their **camera** for video.
+call, Android, Windows and Linux can also turn on their **camera** for video.
 
 ![Desktop app connected to the "Gate" intercom while Gate is speaking](docs/screenshot.png)
 
@@ -37,13 +37,13 @@ call, Android and Windows can also turn on their **camera** for video.
   the tray tooltip names who's speaking. On Android, the background-mode
   notification shows "*Connected with Gate*" or "*Gate wants to talk*". The
   Orange Pi / Raspberry Pi node logs "*🔊 Gate is speaking*".
-- **Video calls (Android and Windows)**: during a call, press **Camera on**
-  to send your camera. It never turns on by itself: every call starts with
-  the camera off. On Android, the **switch** button flips between the front
-  and back camera. On Windows, the camera menu lists the built-in webcam and
-  any USB webcam, so you can choose one. The other side sees your video
-  (the Linux and Raspberry Pi desktop apps show video too; the headless node
-  ignores it). With *Everyone* it works like the audio: the caller sees
+- **Video calls (Android, Windows and Linux)**: during a call, press
+  **Camera on** to send your camera. It never turns on by itself: every call
+  starts with the camera off. On Android, the **switch** button flips between
+  the front and back camera. On Windows and Linux (PC and Raspberry Pi
+  desktop app), the camera menu lists the built-in webcam and any USB
+  webcam, so you can choose one. The other side sees your video (the
+  headless node ignores it). With *Everyone* it works like the audio: the caller sees
   every member, and the members see the caller. Your own picture shows as a small self-view. Video
   adapts to the network: pictures are dropped rather than delaying the
   audio. On Android the camera pauses while the app is in the background.
@@ -238,9 +238,11 @@ portable Windows folder, Android APKs, and the headless node for 32-bit and
 3. The other side opens automatically (or rings, if it has *Answer
    automatically* turned off). Both of you can now talk and listen at the
    same time. The timer and level meters show the line is live.
-   On Android or Windows, press **Camera on** for video (and the switch
-   button for the other camera, or the camera menu on Windows to pick a
-   webcam). The first time, Android asks for camera permission.
+   Press **Camera on** for video (and the switch button for the other
+   camera on Android, or the camera menu on Windows and Linux to pick a
+   webcam). The first time, Android asks for camera permission. On Linux
+   your user needs access to `/dev/video*` (desktop logins normally have
+   it; otherwise `sudo usermod -aG video $USER` and log in again).
 4. Press **HANG UP** (either side) to end it. **Mute** turns your
    microphone off without hanging up.
 5. If a peer doesn't appear, press **+ Add** (or the 🔗 icon) and enter the IP

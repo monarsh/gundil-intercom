@@ -5,6 +5,7 @@
 #include <gdk/gdkx.h>
 #endif
 
+#include "camera_capture.h"
 #include "flutter/generated_plugin_registrant.h"
 #include "window_tray.h"
 
@@ -97,6 +98,7 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
   window_tray_attach_view(view);
+  camera_capture_init(view);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
