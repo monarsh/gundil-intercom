@@ -134,6 +134,7 @@ Edit `/etc/gundil-intercom/node.conf`, then
 | `echo-suppression` | Lower the mic while the other side talks (default `true`). Turn off with a headset or an echo-cancelling USB speakerphone |
 | `gpio-backend`, `gpio-chip` | `auto` / `gpiod` / `sysfs`, and the gpiochip for gpiod |
 | `button-input`, `button-key` | Use a USB keyboard/foot pedal key as the button |
+| `password` | Intercom password. Calls are always encrypted; with a password only intercoms with the same password can connect. Set the same one on every device |
 | `peers` | Intercoms to add by IP if discovery doesn't reach them |
 | `tones` | Connect / hang-up / ring tones |
 

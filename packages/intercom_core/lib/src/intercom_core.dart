@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'mixer.dart';
 import 'models.dart';
 import 'peer_connection.dart';
 import 'protocol.dart';
+import 'secure_channel.dart';
 
 /// Notification for the UI (errors and short info messages).
 class IntercomEvent {
@@ -85,12 +87,14 @@ class IntercomCore {
     this.rogerBeep = true,
     this.autoAnswer = true,
     this.videoReceive = false,
+    String password = '',
     bool? echoSuppression,
     List<SavedPeer> savedPeers = const [],
     this.onSavedPeersChanged,
     this.reconnectInterval = const Duration(seconds: 5),
     this.hooks = const PlatformHooks(),
   }) : _name = name, // ignore: prefer_initializing_formals
+       _password = password,
        _saved = [...savedPeers],
        // Android uses the phone's hardware echo canceller instead.
        echoSuppression = echoSuppression ?? !Platform.isAndroid,
@@ -172,6 +176,8 @@ class IntercomCore {
   int get playbackTarget => sampleRate * 100 ~/ 1000;
 
   String _name;
+  String _password;
+  Uint8List _secret = networkSecret('');
   double _micLevel = 0;
   bool _audioReady = false;
   bool _shutDown = false;
@@ -268,6 +274,40 @@ class IntercomCore {
   bool get selfSpeaking =>
       _audioRunning && !_muted && _micLevel >= speakingThreshold;
 
+  /// Security code of the encrypted link to [peerId] ("123 456"), the same
+  /// on both devices unless someone intercepts the connection.
+  String? securityCode(String peerId) {
+    final link = _links[peerId];
+    return link != null && link.secure ? link.securityCode : null;
+  }
+
+  /// The intercom password ('' = none). Only intercoms with the same
+  /// password can connect; links are encrypted either way.
+  String get password => _password;
+
+  /// Changes the intercom password: hangs up and reconnects every link
+  /// with the new keys.
+  Future<void> setPassword(String value) async {
+    if (value == _password) return;
+    _password = value;
+    _secret = await _deriveSecret(value);
+    if (_password != value) return; // Changed again meanwhile.
+    hangUp();
+    for (final c in _allConnections.toList()) {
+      await c.close();
+    }
+    for (final p in _peers.values) {
+      p.wrongPassword = false;
+    }
+    changed();
+    _retrySaved();
+  }
+
+  /// PBKDF2 takes a moment: run it off the UI isolate.
+  static Future<Uint8List> _deriveSecret(String password) => password.isEmpty
+      ? Future.value(networkSecret(''))
+      : Isolate.run(() => networkSecret(password));
+
   /// We are sending camera video (see [setCamera]).
   bool get cameraOn => _cameraOn;
 
@@ -331,6 +371,7 @@ class IntercomCore {
   // -------------------------------------------------------------- lifecycle
 
   Future<void> start() async {
+    _secret = await _deriveSecret(_password);
     try {
       _server = await ServerSocket.bind(InternetAddress.anyIPv4, preferredPort);
     } on SocketException {
@@ -339,7 +380,7 @@ class IntercomCore {
       _server = await ServerSocket.bind(InternetAddress.anyIPv4, 0);
     }
     _server!.listen(
-      (s) => _adopt(PeerConnection(s, outgoing: false)),
+      (s) => _adopt(PeerConnection(s, outgoing: false, secret: _secret)),
       onError: (Object e) => _emit('Server error: $e', error: true),
     );
 
@@ -530,6 +571,7 @@ class IntercomCore {
       conn = await PeerConnection.connect(
         addrs.first,
         s.port,
+        secret: _secret,
         timeout: const Duration(seconds: 3),
       );
       if (_shutDown) {
@@ -543,7 +585,13 @@ class IntercomCore {
           if (!hello.isCompleted) hello.complete(id);
         },
       );
-      final id = await hello.future.timeout(const Duration(seconds: 4));
+      final failed = conn.done.then<String>(
+        (_) => throw LinkException(conn!.failure ?? LinkFailure.closed),
+      );
+      final id = await Future.any([
+        hello.future,
+        failed,
+      ]).timeout(const Duration(seconds: 8));
       if (!_saved.contains(s)) return true; // Removed meanwhile.
       if (s.peerId != id) {
         s.peerId = id;
@@ -675,11 +723,17 @@ class IntercomCore {
     if (existing != null && !existing.isClosed) return Future.value(existing);
     return _connecting[p.id] ??= () async {
       try {
-        final conn = await PeerConnection.connect(p.address, p.port);
+        final conn = await PeerConnection.connect(
+          p.address,
+          p.port,
+          secret: _secret,
+        );
         conn.remoteId = p.id;
         _links[p.id] = conn;
         p.connected = true;
         _adopt(conn);
+        // Usable once encrypted (fails e.g. on a different password).
+        await conn.ready;
         return conn;
       } finally {
         _connecting.remove(p.id);
@@ -689,6 +743,15 @@ class IntercomCore {
 
   void _onConnectionClosed(PeerConnection c) {
     _allConnections.remove(c);
+    if (c.failure == LinkFailure.wrongPassword) {
+      // We don't know its id (its HELLO didn't decrypt): match the address.
+      for (final p in _peers.values) {
+        if (p.address == c.remoteAddress &&
+            (!c.outgoing || p.port == c.remotePort)) {
+          p.wrongPassword = true;
+        }
+      }
+    }
     final id = c.remoteId;
     if (id != null && identical(_links[id], c)) {
       _links.remove(id);
@@ -698,7 +761,11 @@ class IntercomCore {
           .firstOrNull;
       if (alt != null) _links[id] = alt;
       _peers[id]?.connected = alt != null;
-      if (alt == null && (_conversation?.members.containsKey(id) ?? false)) {
+      // A link that never worked (e.g. wrong password) was never used for
+      // the call: the caller ([connect]) reports why it failed.
+      if (alt == null &&
+          c.verified &&
+          (_conversation?.members.containsKey(id) ?? false)) {
         _removeMember(id, reason: 'Lost connection to ${displayName(id)}');
       }
     }
@@ -718,6 +785,10 @@ class IntercomCore {
     Frame f,
     void Function(String id)? onHello,
   ) {
+    if (c.legacy) {
+      _onLegacyFrame(c, f, onHello);
+      return;
+    }
     if (f.type == MessageType.hello) {
       final m = f.json;
       final id = m['id'];
@@ -738,6 +809,7 @@ class IntercomCore {
       p.connected = true;
       p.version = (m['v'] as int?) ?? 1;
       p.video = m['video'] == true;
+      p.wrongPassword = false;
       _resolveSaved(p);
       onHello?.call(id);
       changed();
@@ -769,7 +841,41 @@ class IntercomCore {
         _onVideo(c, id, f.payload);
       case MessageType.videoAck:
         _onVideoAck(id);
+      case MessageType.key || MessageType.sealed:
+        break; // Handled by PeerConnection.
     }
+  }
+
+  /// A plaintext frame from a version without encryption: learn who it is
+  /// (shown as "Needs update") and refuse calls.
+  void _onLegacyFrame(
+    PeerConnection c,
+    Frame f,
+    void Function(String id)? onHello,
+  ) {
+    if (f.type == MessageType.open) {
+      c.sendLegacy(Frame.json(MessageType.reject, {'reason': 'unsupported'}));
+      return;
+    }
+    if (f.type != MessageType.hello) return;
+    final m = f.json;
+    final id = m['id'];
+    if (id is! String || id == selfId) {
+      c.close();
+      return;
+    }
+    c.remoteId = id;
+    final p = _upsertPeer(
+      id: id,
+      name: (m['name'] as String?) ?? 'Unknown',
+      platform: (m['platform'] as String?) ?? '?',
+      address: c.remoteAddress,
+      port: (m['port'] as int?) ?? defaultTcpPort,
+    );
+    p.version = (m['v'] as int?) ?? 1;
+    _resolveSaved(p);
+    onHello?.call(id);
+    changed();
   }
 
   // ----------------------------------------------------------- conversation
@@ -798,8 +904,8 @@ class IntercomCore {
     final outdated = recipients.where((p) => p.outdated).toList();
     for (final p in outdated) {
       _emit(
-        '${displayName(p.id)} runs an older Gundil Intercom without two-way '
-        'audio. Please update it.',
+        '${displayName(p.id)} runs an older Gundil Intercom without '
+        'encryption. Please update it.',
         error: true,
       );
     }
@@ -1145,7 +1251,8 @@ class IntercomCore {
   int sendVideoFrame(Uint8List jpeg, {int rotation = 0}) {
     final conv = _conversation;
     if (conv == null || !_cameraOn) return 0;
-    if (jpeg.length + 1 > maxFramePayload) return 0;
+    // Room for the rotation byte and the encryption overhead.
+    if (jpeg.length + 1 + sealOverhead > maxFramePayload) return 0;
     final now = DateTime.now();
     Frame? frame;
     var sent = 0;

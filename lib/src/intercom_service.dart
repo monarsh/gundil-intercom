@@ -19,6 +19,7 @@ class IntercomService extends IntercomCore with ChangeNotifier {
     super.rogerBeep,
     super.autoAnswer,
     super.videoReceive,
+    super.password,
     super.echoSuppression,
     super.savedPeers,
     super.onSavedPeersChanged,

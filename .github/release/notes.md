@@ -26,4 +26,4 @@ Intercoms find each other automatically on the same Wi-Fi/LAN. No server, no acc
 
 ## Network
 
-Same LAN/Wi-Fi. Allow **TCP 47801** (audio and video) and **UDP 47800** (discovery). Audio is uncompressed 16 kHz mono, video is JPEG pictures, and neither is encrypted, so use it on trusted networks.
+Same LAN/Wi-Fi. Allow **TCP 47801** (audio and video) and **UDP 47800** (discovery). Audio (uncompressed 16 kHz mono) and video (JPEG pictures) are end-to-end encrypted. Set the same *intercom password* on every device so unknown devices can't connect.

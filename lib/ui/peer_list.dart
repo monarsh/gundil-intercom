@@ -126,7 +126,9 @@ class PeerList extends StatelessWidget {
                 MemberState.calling => 'Calling…',
                 MemberState.ringing => 'Wants to talk',
                 null when e.live?.outdated ?? false =>
-                  'Needs update for two-way audio',
+                  'Needs update (no encryption)',
+                null when e.live?.wrongPassword ?? false =>
+                  'Different intercom password',
                 null => e.online ? e.host : 'Offline · ${e.host}',
               },
               overflow: TextOverflow.ellipsis,

@@ -9,7 +9,8 @@
 /// +--------+----------------------+-----------------+
 /// ```
 ///
-/// Control messages carry UTF-8 JSON payloads; [MessageType.audio] carries raw
+/// After the key exchange every frame travels encrypted inside a
+/// [MessageType.sealed] frame. Control messages carry UTF-8 JSON payloads; [MessageType.audio] carries raw
 /// signed 16-bit little-endian mono PCM at the sample rate announced in the
 /// [MessageType.open] that started the conversation. [MessageType.video]
 /// carries one JPEG camera picture (see [VideoFrame]).
@@ -19,10 +20,12 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 /// Protocol version, sent in [MessageType.hello] and discovery beacons.
-const int protocolVersion = 3;
+/// 4 = encrypted links (see `secure_channel.dart`).
+const int protocolVersion = 4;
 
 /// Oldest peer protocol we can hold a two-way conversation with.
-const int minConversationVersion = 3;
+/// Older versions don't encrypt and can't connect.
+const int minConversationVersion = 4;
 
 /// Default TCP port each peer listens on.
 const int defaultTcpPort = 47801;
@@ -68,7 +71,15 @@ enum MessageType {
   /// Acknowledges one [video] frame. The sender keeps only a couple of
   /// pictures in flight per peer, so video never piles up in the TCP buffer
   /// and delays the audio.
-  videoAck(0x0B);
+  videoAck(0x0B),
+
+  /// Key exchange, the first frame each side sends and the only plaintext
+  /// one: `[version:1][X25519 public key:32]`.
+  key(0x10),
+
+  /// Every other frame, encrypted: ChaCha20-Poly1305 of `[type:1][payload]`
+  /// with the 16-byte tag appended (see `secure_channel.dart`).
+  sealed(0x11);
 
   const MessageType(this.code);
   final int code;

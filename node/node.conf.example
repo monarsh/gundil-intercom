@@ -39,6 +39,11 @@ gpio-backend = auto
 #button-input = /dev/input/by-id/usb-XXXX-event-kbd
 #button-key = 57     # 57 = Space, 28 = Enter
 
+# Intercom password. Calls are always encrypted; with a password, only
+# intercoms with the same password (Settings > Intercom password in the
+# app) can connect. Use the same one on every device (no "#" in it).
+#password = choose-a-long-passphrase
+
 # Intercoms to add by IP if broadcast discovery doesn't reach them.
 #peers = 192.168.1.20, 192.168.1.21:47801
 

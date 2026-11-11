@@ -127,6 +127,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   Future<void> _settingsDialog() async {
     final nameCtl = TextEditingController(text: service.name);
+    final passwordCtl = TextEditingController(text: service.password);
+    var showPassword = false;
     final addrs = await _localAddresses();
     final autostartWas = await Autostart.isEnabled();
     var autostart = autostartWas;
@@ -144,6 +146,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
           title: const Text('Settings'),
+          scrollable: true,
           content: SizedBox(
             width: 380,
             child: Column(
@@ -156,6 +159,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   decoration: const InputDecoration(
                     labelText: 'Device name shown to peers',
                     border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => Navigator.pop(ctx, true),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordCtl,
+                  obscureText: !showPassword,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    labelText: 'Intercom password (optional)',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.lock_outline),
+                    suffixIcon: IconButton(
+                      tooltip: showPassword ? 'Hide' : 'Show',
+                      icon: Icon(
+                        showPassword ? Icons.visibility_off : Icons.visibility,
+                      ),
+                      onPressed: () =>
+                          setLocal(() => showPassword = !showPassword),
+                    ),
+                    helperText:
+                        'Calls are always encrypted. With a password, only '
+                        'intercoms with the same password can connect: set '
+                        'it on every device.',
+                    helperMaxLines: 3,
                   ),
                   onSubmitted: (_) => Navigator.pop(ctx, true),
                 ),
@@ -290,8 +319,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         service.name = name;
         widget.settings.name = name;
       }
+      final password = passwordCtl.text;
+      if (password != service.password) {
+        widget.settings.password = password;
+        await service.setPassword(password);
+        if (mounted) {
+          _showMessage(
+            password.isEmpty
+                ? 'Password removed. Calls stay encrypted.'
+                : 'Password set. Use the same one on every intercom.',
+          );
+        }
+      }
     }
     nameCtl.dispose();
+    passwordCtl.dispose();
     _focus.requestFocus();
   }
 

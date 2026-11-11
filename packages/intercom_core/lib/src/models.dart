@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'protocol.dart';
+
 /// A remote intercom node.
 class Peer {
   Peer({
@@ -28,8 +30,11 @@ class Peer {
   /// The peer can show camera video (the app; not the headless node).
   bool video = false;
 
-  /// Too old for two-way audio (the user must update that device).
-  bool get outdated => version != 0 && version < 3;
+  /// Too old to connect: no encryption (the user must update that device).
+  bool get outdated => version != 0 && version < minConversationVersion;
+
+  /// The last connection failed because it uses another intercom password.
+  bool wrongPassword = false;
 
   static const Duration beaconTimeout = Duration(seconds: 7);
 

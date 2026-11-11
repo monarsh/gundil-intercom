@@ -206,6 +206,8 @@ class IntercomPanel extends StatelessWidget {
           ),
         ),
         if (timer != null) Text(timer, style: text.bodySmall),
+        if (connected.isNotEmpty)
+          _EncryptedBadge(service: service, peers: connected),
         if (conv.group && calling.isNotEmpty && connected.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 4),
@@ -661,6 +663,84 @@ class _WebcamMenu extends StatelessWidget {
             ? null
             : () => controller.isOpen ? controller.close() : controller.open(),
         icon: const Icon(Icons.switch_video),
+      ),
+    );
+  }
+}
+
+/// "Encrypted · 123 456": the call is end-to-end encrypted. Tap to compare
+/// the security code(s) with the other side.
+class _EncryptedBadge extends StatelessWidget {
+  const _EncryptedBadge({required this.service, required this.peers});
+
+  final IntercomService service;
+  final List<String> peers;
+
+  @override
+  Widget build(BuildContext context) {
+    final codes = <String, String>{};
+    for (final id in peers) {
+      final code = service.securityCode(id);
+      if (code != null) codes[id] = code;
+    }
+    if (codes.isEmpty) return const SizedBox.shrink();
+    final label = codes.length == 1
+        ? 'Encrypted · ${codes.values.single}'
+        : 'Encrypted';
+    return TextButton.icon(
+      style: TextButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        foregroundColor: Colors.green.shade700,
+      ),
+      onPressed: () => _explain(context, codes),
+      icon: const Icon(Icons.lock, size: 16),
+      label: Text(label),
+    );
+  }
+
+  void _explain(BuildContext context, Map<String, String> codes) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.lock),
+        title: const Text('End-to-end encrypted'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Audio and video travel encrypted between the devices. '
+              'Nobody else on the network can listen in.',
+            ),
+            const SizedBox(height: 12),
+            for (final e in codes.entries)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text(service.displayName(e.key)),
+                trailing: Text(
+                  e.value,
+                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              'The same code shows on the other device. If it differs, '
+              'someone may be intercepting the call: hang up. Setting the '
+              'same intercom password on every device also prevents this.',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }

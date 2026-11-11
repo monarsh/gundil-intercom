@@ -78,6 +78,11 @@ class Settings {
       _prefs.getBool('${_p}echoSuppression') ?? !Platform.isAndroid;
   set echoSuppression(bool v) => _prefs.setBool('${_p}echoSuppression', v);
 
+  /// Intercom password ('' = none): only intercoms with the same password
+  /// can connect. Calls are encrypted either way.
+  String get password => _prefs.getString('${_p}password') ?? '';
+  set password(String v) => _prefs.setString('${_p}password', v);
+
   /// Windows: minimize / close hide the window to the system tray.
   bool get minimizeToTray => _prefs.getBool('${_p}minimizeToTray') ?? true;
   set minimizeToTray(bool v) => _prefs.setBool('${_p}minimizeToTray', v);

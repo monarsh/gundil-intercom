@@ -61,6 +61,7 @@ Future<void> main(List<String> args) async {
     ),
     autoAnswer: cfg.flag('auto-answer', fallback: true),
     echoSuppression: cfg.flag('echo-suppression', fallback: true),
+    password: cfg.str('password') ?? '',
     savedPeers: saved,
     onSavedPeersChanged: (list) => state.save(saved: list),
   );
@@ -345,7 +346,8 @@ class _Node {
         log(
           '  ${e.online ? '●' : '○'} ${e.name}  ${e.host}:${e.port}  '
           '${e.platform}${e.isSaved ? '  (saved)' : ''}'
-          '${e.live?.outdated ?? false ? '  (needs update)' : ''}',
+          '${e.live?.outdated ?? false ? '  (needs update)' : ''}'
+          '${e.live?.wrongPassword ?? false ? '  (different password)' : ''}',
         );
       }
       log('Button connects to: $targetName');

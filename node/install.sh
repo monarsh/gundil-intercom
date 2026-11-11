@@ -19,7 +19,8 @@ install -m 755 "$HERE/setup-audio.sh" /opt/gundil-intercom/
 
 mkdir -p /etc/gundil-intercom
 if [ ! -f /etc/gundil-intercom/node.conf ]; then
-  install -m 644 "$HERE/node.conf.example" /etc/gundil-intercom/node.conf
+  # 600: it may hold the intercom password.
+  install -m 600 "$HERE/node.conf.example" /etc/gundil-intercom/node.conf
   sed -i "s/^name = Gate$/name = $(hostname)/" /etc/gundil-intercom/node.conf
   if grep -qi 'raspberry pi' /proc/device-tree/model 2>/dev/null; then
     # Raspberry Pi: button on GPIO 17 (pin 11), LED on GPIO 27 (pin 13).

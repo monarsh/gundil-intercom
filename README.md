@@ -47,6 +47,15 @@ call, Android and Windows can also turn on their **camera** for video.
   every member, and the members see the caller. Your own picture shows as a small self-view. Video
   adapts to the network: pictures are dropped rather than delaying the
   audio. On Android the camera pauses while the app is in the background.
+- **Encrypted calls**: every connection between intercoms is end-to-end
+  encrypted (X25519 key exchange, ChaCha20-Poly1305), audio and video
+  included, so nobody else on the network can listen in. The call screen
+  shows 🔒 *Encrypted · 123 456*: the same 6-digit security code appears on
+  both devices, and tapping it explains how to compare. Optionally set an
+  **intercom password** (*Settings*, or `password` in the node's
+  `node.conf`) on every device: then only intercoms with that password can
+  connect at all; one with another password shows *Different intercom
+  password*.
 - **Mute** and a call timer.
 - **Android audio output picker**: during a call, tap the output button to
   switch between **Speaker**, **Phone (earpiece)**, a **Bluetooth headset**
@@ -115,13 +124,24 @@ tool/build_node.sh arm      # or arm64 / x64  -> build/node/*.tar.gz
 | Discovery | `packages/intercom_core/lib/src/discovery.dart` | JSON beacon every 2 s to `255.255.255.255` and each interface's /24 broadcast address. A peer counts as offline after 7 s without a beacon. |
 | Transport | `packages/intercom_core/lib/src/peer_connection.dart` | One persistent TCP socket per peer pair, `TCP_NODELAY`. |
 | Protocol | `packages/intercom_core/lib/src/protocol.dart` | Each frame is `[type:1][length:4 BE][payload]`. |
+| Encryption | `packages/intercom_core/lib/src/secure_channel.dart` | X25519 key exchange per connection, HKDF-SHA256, ChaCha20-Poly1305 per frame; optional password (PBKDF2) mixed into the keys. |
 | Conversation logic | `packages/intercom_core/lib/src/intercom_core.dart` | Peers, connect / accept / hang up, liveness, audio pump. Pure Dart, shared by the app and the headless node. |
 | Mixer | `packages/intercom_core/lib/src/mixer.dart` | Per-peer jitter buffers (60 ms prebuffer, 300 ms cap) mixed for the speaker; about 100 ms queued in the device. |
 | Echo suppression | `packages/intercom_core/lib/src/echo_suppressor.dart` | Lowers the mic by about 22 dB while the far end talks, unless you speak clearly louder (barge-in). |
 | Audio I/O | `packages/intercom_audio` | Flutter FFI plugin built on [miniaudio](https://miniaud.io), with lock-free ring buffers between the native audio threads and Dart. On Android it uses the voice-communication path, which has the echo canceller. |
 | Android glue | `android/.../GundilApp.kt` etc. | Mic permission, Wi-Fi multicast lock, call audio mode and speaker routing, background service. |
 
-### Wire protocol (v3)
+### Wire protocol (v4)
+
+Each connection starts with a **key exchange**: both sides send `0x10 KEY`
+`[version=1][X25519 public key:32]` in plaintext. From the shared secret,
+HKDF-SHA256 (salted with the PBKDF2 hash of the intercom password, or a fixed
+value without one) derives a ChaCha20-Poly1305 key for each direction and the
+6-digit security code. Every other frame then travels as `0x11 SEALED`:
+ChaCha20-Poly1305 of `[type:1][payload]` with a 16-byte tag; the nonce is a
+per-direction frame counter, so replayed, dropped or reordered frames are
+rejected. A first frame that doesn't decrypt means a different password, and
+the connection is closed. The frames below are what's inside.
 
 | Code | Type | Payload |
 |---|---|---|
@@ -137,8 +157,11 @@ tool/build_node.sh arm      # or arm64 / x64  -> build/node/*.tar.gz
 
 Each device is in at most one conversation, so a second caller gets *busy*.
 With *Everyone*, the caller is the hub: each member streams to the hub and the
-hub's mixer combines them. **All devices must run protocol v3** (this
-version); older push-to-talk builds show as "Needs update".
+hub's mixer combines them. **All devices must run protocol v4** (this
+version, with encryption); older builds show as "Needs update".
+
+UDP discovery beacons (name, platform, port) stay unencrypted so intercoms can
+find each other; they carry no audio or video.
 
 ## Building
 
@@ -302,7 +325,8 @@ computer, for example while testing.
 - If port 47801 is already taken, the app uses a random port and advertises it
   in its beacons.
 - Audio is uncompressed (about 256 kbit/s in each direction while connected)
-  and **not encrypted**.
+  and **end-to-end encrypted**, like video. Set an intercom password to keep
+  unknown devices from connecting at all.
   It is meant for trusted local networks.
 
 ## Project layout

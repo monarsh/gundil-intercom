@@ -22,6 +22,9 @@ class NodeConfig {
         'and wait for the button / "a"',
     'echo-suppression':
         'Lower the mic while the other side talks (default true)',
+    'password':
+        'Intercom password: only intercoms with the same password can '
+        'connect (default: none; calls are encrypted either way)',
     'peers': 'Comma-separated host[:port] list to add by IP (optional)',
     'button-gpio':
         'GPIO number of the connect / hang-up button (e.g. 6 = PA6, pin 7)',
