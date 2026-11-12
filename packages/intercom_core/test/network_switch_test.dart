@@ -107,8 +107,13 @@ void main() {
     expect(alice.peer('bob-id')!.connected, isTrue);
     wifi.cut();
     alice.networkChanged();
-    // Without the check it would look connected for many minutes.
-    await eventually(() => !alice.peer('bob-id')!.connected);
+    // Without the check it would look connected for many minutes. With it,
+    // the link has [IntercomCore.probeTimeout] to answer, then the next
+    // housekeeping tick (every second) closes it.
+    await eventually(
+      () => !alice.peer('bob-id')!.connected,
+      timeout: IntercomCore.probeTimeout + const Duration(seconds: 6),
+    );
   });
 
   test('a call survives a network switch', () async {
