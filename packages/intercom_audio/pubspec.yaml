@@ -1,5 +1,5 @@
 name: intercom_audio
-description: "Low-latency 16-bit mono PCM capture/playback over FFI (miniaudio) for Linux, Windows and Android."
+description: "Low-latency 16-bit mono PCM capture/playback over FFI (miniaudio) for Linux, Windows, Android, iOS and macOS."
 version: 1.0.0
 publish_to: none
 
@@ -25,3 +25,9 @@ flutter:
         ffiPlugin: true
       windows:
         ffiPlugin: true
+      ios:
+        ffiPlugin: true
+        sharedDarwinSource: true
+      macos:
+        ffiPlugin: true
+        sharedDarwinSource: true

@@ -81,7 +81,16 @@ static void playback_cb(ma_device* dev, void* out, const void* in,
 int32_t ia_init(int32_t sample_rate) {
   if (g_context_ready) return 0;
   g_sample_rate = (ma_uint32)sample_rate;
-  ma_result r = ma_context_init(NULL, 0, NULL, &g_context);
+  ma_context_config ctx_cfg = ma_context_config_init();
+#if defined(__APPLE__)
+  // iPhone: one session for talking and listening, on the loudspeaker
+  // (not the earpiece), with Bluetooth headsets allowed. Ignored on macOS.
+  ctx_cfg.coreaudio.sessionCategory = ma_ios_session_category_play_and_record;
+  ctx_cfg.coreaudio.sessionCategoryOptions =
+      ma_ios_session_category_option_default_to_speaker |
+      ma_ios_session_category_option_allow_bluetooth;
+#endif
+  ma_result r = ma_context_init(NULL, 0, &ctx_cfg, &g_context);
   if (r != MA_SUCCESS) {
     set_error("context init", r);
     return -1;

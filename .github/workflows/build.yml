@@ -184,6 +184,56 @@ jobs:
           name: gundil-intercom-node-linux-arm64
           path: build/node/gundil-intercom-node-linux-arm64.tar.gz
 
+  ios:
+    # iPhone / iPad. Unsigned: installed with AltStore or Sideloadly, which
+    # sign it with the user's own Apple ID (see .github/release/notes.md).
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # Pinned: the tested toolchain (3.50 deprecates flutter/material).
+          flutter-version: 3.47.9
+          cache: true
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          mkdir -p build/ipa/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
+          (cd build/ipa && zip -qry gundil-intercom-ios-unsigned.ipa Payload)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-ios
+          path: build/ipa/gundil-intercom-ios-unsigned.ipa
+
+  macos:
+    # Mac (Apple silicon and Intel). Signed ad hoc only (no Apple Developer
+    # ID): opened the first time with right-click -> Open.
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          # Pinned: the tested toolchain (3.50 deprecates flutter/material).
+          flutter-version: 3.47.9
+          cache: true
+      - run: flutter build macos --release
+      - name: Package app
+        run: |
+          set -euo pipefail
+          cd build/macos/Build/Products/Release
+          ditto -c -k --sequesterRsrc --keepParent "Gundil Intercom.app" \
+            "$GITHUB_WORKSPACE/gundil-intercom-macos.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gundil-intercom-macos
+          path: gundil-intercom-macos.zip
+
   release:
     # Publishes a GitHub Release with every build, either when a v* tag is
     # pushed (git tag v1.0.0 && git push origin v1.0.0) or when the workflow
@@ -192,7 +242,7 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' && inputs.release != '')
-    needs: [linux, linux-arm64, windows, android, node]
+    needs: [linux, linux-arm64, windows, android, node, ios, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -220,6 +270,8 @@ jobs:
           cp "$A/gundil-intercom-linux-arm64/gundil-intercom-linux-arm64.tar.gz" "dist/GundilIntercom-$V-linux-arm64.tar.gz"
           cp "$A/gundil-intercom-node-linux-arm/gundil-intercom-node-linux-arm.tar.gz" "dist/gundil-intercom-node-$V-linux-arm.tar.gz"
           cp "$A/gundil-intercom-node-linux-arm64/gundil-intercom-node-linux-arm64.tar.gz" "dist/gundil-intercom-node-$V-linux-arm64.tar.gz"
+          cp "$A/gundil-intercom-ios/gundil-intercom-ios-unsigned.ipa" "dist/GundilIntercom-$V-ios-unsigned.ipa"
+          cp "$A/gundil-intercom-macos/gundil-intercom-macos.zip" "dist/GundilIntercom-$V-macos.zip"
           chmod +x dist/*.AppImage
           (cd dist && sha256sum * > SHA256SUMS.txt)
           # "What's new" for this tag (optional), then the general notes.

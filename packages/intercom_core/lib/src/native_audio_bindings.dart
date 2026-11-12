@@ -35,7 +35,10 @@ DynamicLibrary _open() {
     throw ArgumentError('Could not load lib$_libName.so: $lastError');
   }
   if (Platform.isWindows) return DynamicLibrary.open('$_libName.dll');
-  if (Platform.isMacOS) return DynamicLibrary.open('lib$_libName.dylib');
+  // iOS and macOS: CocoaPods builds the plugin as a framework.
+  if (Platform.isIOS || Platform.isMacOS) {
+    return DynamicLibrary.open('$_libName.framework/$_libName');
+  }
   throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
 }
 

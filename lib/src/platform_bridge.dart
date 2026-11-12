@@ -13,7 +13,8 @@ class PlatformBridge {
 
   /// Requests RECORD_AUDIO at runtime. Returns true when granted.
   static Future<bool> requestMicrophone() async {
-    if (!_android) return true;
+    // iOS and macOS answer this one too (AppDelegate / MainFlutterWindow).
+    if (!_android && !Platform.isIOS && !Platform.isMacOS) return true;
     try {
       return await _channel.invokeMethod<bool>('requestMicrophone') ?? false;
     } on PlatformException {
