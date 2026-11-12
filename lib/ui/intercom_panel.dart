@@ -224,7 +224,9 @@ class IntercomPanel extends StatelessWidget {
         SizedBox(height: compact ? 8 : 16),
         Wrap(
           spacing: 12,
+          runSpacing: 8,
           alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             FilledButton.tonalIcon(
               onPressed: service.toggleMute,

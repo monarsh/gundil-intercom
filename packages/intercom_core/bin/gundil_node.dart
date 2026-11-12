@@ -83,7 +83,7 @@ Future<void> main(List<String> args) async {
 
   await core.start();
   log(
-    'Gundil Intercom node "$name" listening on TCP ${core.listenPort}, '
+    'Gundil Intercom node $appVersion "$name" listening on TCP ${core.listenPort}, '
     'discovery ${core.discoveryRunning ? 'on' : 'OFF'}',
   );
 

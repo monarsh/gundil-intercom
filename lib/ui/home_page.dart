@@ -276,6 +276,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
                 const SizedBox(height: 4),
                 SelectableText(
+                  'Gundil Intercom $appVersion\n'
                   'Addresses: ${addrs.isEmpty ? 'none' : addrs.join(', ')}\n'
                   'TCP port: ${service.listenPort}\n'
                   'Discovery: ${service.discoveryRunning ? 'UDP $discoveryPort broadcast' : 'off'}',
@@ -415,7 +416,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     children: [
                       const Text('Gundil Intercom'),
                       Text(
-                        'You are “${service.name}”',
+                        'You are “${service.name}” · v$appVersion',
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
