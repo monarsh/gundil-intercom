@@ -29,11 +29,31 @@ android {
         versionName = flutter.versionName
     }
 
+    // Release key: Android only installs an update signed with the same key
+    // as the installed app, so every release must use this one key. CI
+    // passes it in from repository secrets (see .github/workflows/build.yml);
+    // locally it can come from the same environment variables. Without it
+    // (local builds) the debug key is used.
+    val releaseStore = System.getenv("ANDROID_KEYSTORE_PATH")
+    signingConfigs {
+        if (!releaseStore.isNullOrEmpty()) {
+            create("release") {
+                storeFile = file(releaseStore)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                    ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (releaseStore.isNullOrEmpty()) {
+                signingConfigs.getByName("debug")
+            } else {
+                signingConfigs.getByName("release")
+            }
         }
     }
 }

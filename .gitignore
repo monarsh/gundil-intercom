@@ -49,3 +49,8 @@ app.*.map.json
 
 # Locally built APKs handed out for testing
 /apk/
+
+# Android release signing key (never commit it)
+*.jks
+*.keystore
+key.properties
