@@ -3,7 +3,7 @@ description: >-
   Platform-independent engine of Gundil Intercom: LAN discovery, TCP
   protocol, push-to-talk logic, saved peers, FFI audio bindings, and the
   headless node (bin/gundil_node.dart) for boards such as the Orange Pi PC.
-version: 1.4.0
+version: 1.5.1
 publish_to: none
 
 environment:
