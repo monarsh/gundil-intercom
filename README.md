@@ -1,4 +1,4 @@
-# Gundil Intercom
+# <img src="docs/icon.png" width="44" alt=""> Gundil Intercom
 
 A serverless, peer-to-peer **two-way audio intercom over TCP/IP** for
 **Android, Windows, Linux, Orange Pi PC and Raspberry Pi**. Pick who to talk

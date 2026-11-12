@@ -110,7 +110,7 @@ class IntercomService : Service() {
             .setContentTitle(title)
             .setContentText(text)
             .setOnlyAlertOnce(true)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_intercom)
             .setContentIntent(open)
             .setOngoing(true)
             .setShowWhen(false)
