@@ -1,7 +1,7 @@
 # <img src="docs/icon.png" width="44" alt=""> Gundil Intercom
 
 A serverless, peer-to-peer **two-way audio intercom over TCP/IP** for
-**Android, Windows, Linux, Orange Pi PC and Raspberry Pi**. Pick who to talk
+**Android, iPhone, Windows, Mac, Linux, Orange Pi PC and Raspberry Pi**. Pick who to talk
 to and press **Connect**: both sides talk and listen at the same time, like a
 phone call, until one of you hangs up. Intercoms answer automatically, like a
 door station; you can turn that off to ring and accept instead. During a
@@ -13,6 +13,8 @@ call, Android, Windows and Linux can also turn on their **camera** for video.
 |---|---|---|
 | Android (phone/tablet) | App | Phone's hardware echo canceller (call audio mode) |
 | Windows 10/11 | App + installer | Software echo suppression |
+| iPhone / iPad (iOS 15+) | App (unsigned IPA, sideloaded) | Software echo suppression |
+| Mac (macOS 10.15+) | App | Software echo suppression |
 | Linux PC (x64) | App | Software echo suppression |
 | Raspberry Pi 4/5, 64-bit OS | App (`linux-arm64`) **or** headless node | Software echo suppression |
 | Orange Pi PC/One/Zero, Raspberry Pi 2/3 or 32-bit OS | Headless node | Software echo suppression |

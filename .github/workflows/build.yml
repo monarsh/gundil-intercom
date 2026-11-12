@@ -201,6 +201,9 @@ jobs:
       - name: Package unsigned IPA
         run: |
           set -euo pipefail
+          # The native audio library must be inside, with its entry points.
+          LIB=build/ios/iphoneos/Runner.app/Frameworks/intercom_audio.framework/intercom_audio
+          nm -gU "$LIB" | grep -q _ia_init
           mkdir -p build/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
           (cd build/ipa && zip -qry gundil-intercom-ios-unsigned.ipa Payload)
@@ -227,6 +230,8 @@ jobs:
         run: |
           set -euo pipefail
           cd build/macos/Build/Products/Release
+          # The native audio library must be inside, with its entry points.
+          nm -gU "Gundil Intercom.app/Contents/Frameworks/intercom_audio.framework/intercom_audio" | grep -q _ia_init
           ditto -c -k --sequesterRsrc --keepParent "Gundil Intercom.app" \
             "$GITHUB_WORKSPACE/gundil-intercom-macos.zip"
       - uses: actions/upload-artifact@v4
