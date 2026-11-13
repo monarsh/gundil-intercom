@@ -2,12 +2,17 @@ package com.p2pintercom.p2p_intercom
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 
 /**
  * Chooses where two-way call audio plays (and is recorded): loudspeaker,
@@ -22,6 +27,12 @@ import android.os.Looper
  * headset during a call switches to it; if the current device goes away,
  * the best remaining one is used. [onChange] reports every change so the UI
  * stays in sync.
+ *
+ * Ear detection (like a phone call): while the phone is held to the ear
+ * (proximity sensor), audio on the loudspeaker or a Bluetooth device moves
+ * to the earpiece and the screen turns off; taking the phone away goes back
+ * to that speaker / Bluetooth device. A wired headset is left alone, and a
+ * route the user picks by hand always wins.
  */
 class AudioRouter(
     private val context: Context,
@@ -57,6 +68,14 @@ class AudioRouter(
     private var deviceCallback: AudioDeviceCallback? = null
     private var commListener: Any? = null // AudioManager.OnCommunicationDeviceChangedListener
 
+    // Ear detection.
+    private var proximity: SensorEventListener? = null
+    private var screenOff: PowerManager.WakeLock? = null
+    private var atEar = false
+    /** The speaker / Bluetooth route to go back to when the ear moves away. */
+    private var beforeEar: Route? = null
+    private val leaveEar = Runnable { onEar(false) }
+
     // -------------------------------------------------------------- public
 
     fun start() {
@@ -65,12 +84,14 @@ class AudioRouter(
         am.mode = AudioManager.MODE_IN_COMMUNICATION
         applyBest(null)
         registerCallbacks()
+        startEarDetection()
         notifyChange()
     }
 
     fun stop() {
         if (!active) return
         active = false
+        stopEarDetection()
         unregisterCallbacks()
         if (Build.VERSION.SDK_INT >= 31) {
             am.clearCommunicationDevice()
@@ -96,6 +117,7 @@ class AudioRouter(
     /** Switches to the route with [id]. Returns the new state. */
     fun select(id: String): Map<String, Any?> {
         val route = routes().firstOrNull { it.id == id }
+        beforeEar = null // The user's choice wins.
         if (route != null) apply(route)
         notifyChange()
         return state()
@@ -104,6 +126,7 @@ class AudioRouter(
     /** Compatibility with the old speaker on/off switch. */
     fun setSpeaker(on: Boolean) {
         val wanted = if (on) SPEAKER else EARPIECE
+        beforeEar = null
         routes().firstOrNull { it.type == wanted }?.let { apply(it) }
         notifyChange()
     }
@@ -204,6 +227,76 @@ class AudioRouter(
                 am.isSpeakerphoneOn = false
             }
         }
+    }
+
+    // -------------------------------------------------------- ear detection
+
+    private fun startEarDetection() {
+        if (!hasEarpiece()) return // Tablets: no earpiece to switch to.
+        val sm = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager ?: return
+        val sensor = sm.getDefaultSensor(Sensor.TYPE_PROXIMITY) ?: return
+        // Near = closer than the sensor's maximum (many report only 0 / max),
+        // capped at 5 cm.
+        val nearBelow = minOf(sensor.maximumRange, 5f)
+        val l = object : SensorEventListener {
+            override fun onSensorChanged(e: SensorEvent) {
+                val near = e.values.isNotEmpty() && e.values[0] < nearBelow
+                main.removeCallbacks(leaveEar)
+                // To the ear at once; away only once it stays away a moment
+                // (no flapping while the phone moves).
+                if (near) onEar(true) else main.postDelayed(leaveEar, 400)
+            }
+
+            override fun onAccuracyChanged(s: Sensor?, accuracy: Int) {}
+        }
+        sm.registerListener(l, sensor, SensorManager.SENSOR_DELAY_NORMAL, main)
+        proximity = l
+        // The system turns the screen off while the phone is at the ear, so
+        // the cheek doesn't press buttons.
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) {
+            screenOff = pm.newWakeLock(
+                PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "gundil:ear"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(4 * 60 * 60 * 1000L) // Released when the call ends.
+            }
+        }
+    }
+
+    private fun stopEarDetection() {
+        main.removeCallbacks(leaveEar)
+        proximity?.let {
+            (context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager)
+                ?.unregisterListener(it)
+        }
+        proximity = null
+        screenOff?.let { if (it.isHeld) it.release() }
+        screenOff = null
+        atEar = false
+        beforeEar = null
+    }
+
+    private fun onEar(near: Boolean) {
+        if (!active || near == atEar) return
+        atEar = near
+        if (near) {
+            val cur = current() ?: return
+            if (cur.type != SPEAKER && cur.type != BLUETOOTH) return
+            val earpiece = routes().firstOrNull { it.type == EARPIECE } ?: return
+            beforeEar = cur
+            apply(earpiece)
+        } else {
+            val back = beforeEar ?: return
+            beforeEar = null
+            // Only if still on the earpiece (nothing else was chosen since).
+            if (current()?.type != EARPIECE) return
+            val list = routes()
+            val target = list.firstOrNull { it.id == back.id }
+                ?: list.firstOrNull { it.type == back.type }
+            if (target != null) apply(target) else applyBest(null)
+        }
+        notifyChange()
     }
 
     // ------------------------------------------------------------ callbacks

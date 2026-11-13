@@ -25,9 +25,23 @@ class PlatformBridge {
   }
 
   /// Puts Android audio into voice-communication mode (enables the phone's
-  /// echo canceller) and picks the output (see [getAudioRoutes]).
-  static Future<void> startCallAudio() => _invoke('startCallAudio');
-  static Future<void> stopCallAudio() => _invoke('stopCallAudio');
+  /// echo canceller) and picks the output (see [getAudioRoutes]). On
+  /// Android and iPhone this also turns on ear detection: held to the ear,
+  /// the call moves to the earpiece.
+  static Future<void> startCallAudio() => _invokePhone('startCallAudio');
+  static Future<void> stopCallAudio() => _invokePhone('stopCallAudio');
+
+  /// Android and iOS (AppDelegate.swift) both implement these.
+  static Future<void> _invokePhone(String method) async {
+    if (!_android && !Platform.isIOS) return;
+    try {
+      await _channel.invokeMethod<void>(method);
+    } on PlatformException {
+      // Best effort.
+    } on MissingPluginException {
+      // Running in a test harness.
+    }
+  }
 
   /// Audio outputs: `{"active", "routes": [{"id","type","name"}], "current"}`.
   static Future<Map<Object?, Object?>?> getAudioRoutes() =>
