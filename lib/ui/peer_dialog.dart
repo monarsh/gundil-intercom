@@ -4,22 +4,31 @@ import 'package:intercom_core/intercom_core.dart';
 
 /// Result of the add/edit peer dialog.
 class PeerFormResult {
-  PeerFormResult({required this.label, required this.host, required this.port});
+  PeerFormResult({
+    required this.label,
+    required this.host,
+    required this.port,
+    this.altHost = '',
+  });
   final String label;
   final String host;
   final int port;
+
+  /// Alternate (secondary) address, '' = none.
+  final String altHost;
 }
 
 /// Dialog for adding a peer by IP or editing a saved one.
 ///
-/// [hostEditable] is false when giving a discovered peer a custom name (its
-/// address is known and managed automatically).
+/// [hostEditable] is false for a discovered peer (its address is known and
+/// managed automatically); its alternate address can still be set.
 Future<PeerFormResult?> showPeerDialog(
   BuildContext context, {
   required String title,
   String label = '',
   String host = '',
   int port = defaultTcpPort,
+  String altHost = '',
   String? nameHint,
   bool hostEditable = true,
   String confirmText = 'Save',
@@ -31,6 +40,7 @@ Future<PeerFormResult?> showPeerDialog(
       label: label,
       host: host,
       port: port,
+      altHost: altHost,
       nameHint: nameHint,
       hostEditable: hostEditable,
       confirmText: confirmText,
@@ -44,6 +54,7 @@ class _PeerDialog extends StatefulWidget {
     required this.label,
     required this.host,
     required this.port,
+    required this.altHost,
     required this.nameHint,
     required this.hostEditable,
     required this.confirmText,
@@ -53,6 +64,7 @@ class _PeerDialog extends StatefulWidget {
   final String label;
   final String host;
   final int port;
+  final String altHost;
   final String? nameHint;
   final bool hostEditable;
   final String confirmText;
@@ -72,12 +84,16 @@ class _PeerDialogState extends State<_PeerDialog> {
   late final TextEditingController _port = TextEditingController(
     text: '${widget.port}',
   );
+  late final TextEditingController _alt = TextEditingController(
+    text: widget.altHost,
+  );
 
   @override
   void dispose() {
     _label.dispose();
     _host.dispose();
     _port.dispose();
+    _alt.dispose();
     super.dispose();
   }
 
@@ -89,6 +105,7 @@ class _PeerDialogState extends State<_PeerDialog> {
         label: _label.text.trim(),
         host: _host.text.trim(),
         port: int.parse(_port.text.trim()),
+        altHost: _alt.text.trim(),
       ),
     );
   }
@@ -127,7 +144,7 @@ class _PeerDialogState extends State<_PeerDialog> {
                       autofocus: widget.hostEditable && widget.host.isEmpty,
                       keyboardType: TextInputType.url,
                       decoration: const InputDecoration(
-                        labelText: 'IP address or host',
+                        labelText: 'Primary address',
                         hintText: '192.168.1.42',
                         border: OutlineInputBorder(),
                       ),
@@ -161,6 +178,29 @@ class _PeerDialogState extends State<_PeerDialog> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _alt,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Alternate address',
+                  hintText: 'e.g. 100.64.0.7 (VPN / Tailscale)',
+                  helperText:
+                      'Optional. Another IP or host of the same device; '
+                      'whichever answers is used.',
+                  helperMaxLines: 2,
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) {
+                  final t = v?.trim() ?? '';
+                  if (t.isEmpty) return null;
+                  if (t.contains(' ')) return 'No spaces';
+                  if (t == _host.text.trim()) return 'Same as the primary';
+                  return null;
+                },
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _submit(),
               ),
             ],
           ),

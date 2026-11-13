@@ -103,6 +103,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         host: r.host,
         port: r.port,
         label: r.label,
+        altHost: r.altHost,
       );
       final name = r.label.isEmpty ? '${r.host}:${r.port}' : r.label;
       _messenger.currentState?.showSnackBar(

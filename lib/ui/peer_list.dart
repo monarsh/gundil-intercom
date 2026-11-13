@@ -132,7 +132,7 @@ class PeerList extends StatelessWidget {
                   'Needs update (no encryption)',
                 null when e.live?.wrongPassword ?? false =>
                   'Different intercom password',
-                null => e.online ? e.host : 'Offline · ${e.host}',
+                null => e.online ? _hosts(e) : 'Offline · ${_hosts(e)}',
               },
               overflow: TextOverflow.ellipsis,
               style: TextStyle(color: muted),
@@ -167,6 +167,12 @@ class PeerList extends StatelessWidget {
     );
   }
 
+  /// "192.168.1.5" or, with an alternate address, "192.168.1.5 · 100.64.0.7".
+  static String _hosts(PeerEntry e) {
+    final alt = e.altHost;
+    return alt.isEmpty || alt == e.host ? e.host : '${e.host} · $alt';
+  }
+
   Widget _menu(BuildContext context, PeerEntry e) {
     return PopupMenuButton<_PeerAction>(
       tooltip: 'Peer options',
@@ -181,7 +187,7 @@ class PeerList extends StatelessWidget {
           value: _PeerAction.edit,
           child: ListTile(
             leading: const Icon(Icons.edit),
-            title: Text(e.isSaved ? 'Edit…' : 'Rename…'),
+            title: const Text('Edit…'),
           ),
         ),
         if (!e.isSaved)
@@ -206,10 +212,10 @@ class PeerList extends StatelessWidget {
   Future<void> _edit(BuildContext context, PeerEntry e) async {
     final saved = e.saved;
     if (saved == null) {
-      // Discovered peer: rename = save it with a custom label.
+      // Discovered peer: a name or an alternate address saves it.
       final r = await showPeerDialog(
         context,
-        title: 'Rename peer',
+        title: 'Edit peer',
         label: '',
         nameHint: e.name,
         host: e.host,
@@ -217,7 +223,7 @@ class PeerList extends StatelessWidget {
         hostEditable: false,
       );
       if (r == null) return;
-      service.saveLivePeer(e.live!.id, label: r.label);
+      service.saveLivePeer(e.live!.id, label: r.label, altHost: r.altHost);
       return;
     }
     final r = await showPeerDialog(
@@ -227,6 +233,7 @@ class PeerList extends StatelessWidget {
       nameHint: e.live?.name,
       host: saved.host,
       port: saved.port,
+      altHost: saved.altHost,
     );
     if (r == null || !context.mounted) return;
     try {
@@ -236,6 +243,7 @@ class PeerList extends StatelessWidget {
         label: r.label,
         host: r.host,
         port: r.port,
+        altHost: r.altHost,
       );
       if (addressChanged && !online && context.mounted) {
         _snack(

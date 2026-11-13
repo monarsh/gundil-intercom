@@ -33,6 +33,10 @@ class Peer {
 
   static const int maxEndpoints = 4;
 
+  /// The IPv4 addresses the peer says it has (its HELLO lists them), e.g.
+  /// LAN and VPN: tried too when its usual address doesn't answer.
+  List<InternetAddress> announced = const [];
+
   /// Last time we heard a discovery beacon from this peer.
   DateTime? lastBeacon;
 
@@ -73,6 +77,7 @@ class SavedPeer {
     this.label = '',
     this.peerId,
     this.platform = '?',
+    this.altHost = '',
   });
 
   /// Stable local identifier of this list entry.
@@ -81,9 +86,17 @@ class SavedPeer {
   /// Custom display name; empty means "use the name the peer announces".
   String label;
 
-  /// IP address or hostname used to (re)connect.
+  /// IP address or hostname used to (re)connect (the primary one).
   String host;
   int port;
+
+  /// Optional alternate (secondary) address of the same device, e.g. its
+  /// VPN / Tailscale address next to the LAN one. Both are tried; whichever
+  /// answers is used. Empty = none.
+  String altHost;
+
+  /// Primary first, then the alternate.
+  List<String> get hosts => [host, if (altHost.isNotEmpty) altHost];
 
   /// The remote device id, learned on first successful connection.
   String? peerId;
@@ -100,6 +113,7 @@ class SavedPeer {
     'port': port,
     if (peerId != null) 'peerId': peerId,
     'platform': platform,
+    if (altHost.isNotEmpty) 'alt': altHost,
   };
 
   static SavedPeer? fromJson(Object? json) {
@@ -113,6 +127,7 @@ class SavedPeer {
       label: (json['label'] as String?) ?? '',
       peerId: json['peerId'] as String?,
       platform: (json['platform'] as String?) ?? '?',
+      altHost: (json['alt'] as String?) ?? '',
     );
   }
 }
@@ -138,6 +153,9 @@ class PeerEntry {
   }
 
   bool get online => live?.online ?? false;
+
+  /// The alternate address of a saved peer ('' = none).
+  String get altHost => saved?.altHost ?? '';
   String get platform => live?.platform ?? saved!.platform;
 
   String get host {

@@ -593,6 +593,10 @@ class IntercomCore {
     for (final id in _conversation?.connected.toList() ?? const <String>[]) {
       _relink(id);
     }
+    // Tell the peers our new addresses (on the links that still work).
+    for (final c in _links.values.toSet()) {
+      if (!c.isClosed && c.verified) c.send(_hello());
+    }
     _restartDiscovery();
     // Give the new network a moment (DHCP, VPN handshake), then reconnect.
     for (final delay in const [Duration(seconds: 1), Duration(seconds: 5)]) {
@@ -734,9 +738,15 @@ class IntercomCore {
       add(e.$1, e.$2);
     }
     for (final s in _saved.where((s) => s.peerId == p.id)) {
-      for (final a in await _lookup(s.host)) {
-        add(a, s.port);
+      for (final h in s.hosts) {
+        for (final a in await _lookup(h)) {
+          add(a, s.port);
+        }
       }
+    }
+    // Last, the other addresses the peer told us it has.
+    for (final a in p.announced) {
+      add(a, p.port);
     }
     return _connectAny(out);
   }
@@ -856,9 +866,12 @@ class IntercomCore {
     required String host,
     int port = defaultTcpPort,
     String label = '',
+    String altHost = '',
   }) async {
     final h = host.trim();
+    final alt = altHost.trim();
     if (h.isEmpty) throw ArgumentError('Host is empty');
+    if (alt == h) throw ArgumentError('The alternate address is the same');
     if (_saved.any((s) => s.host == h && s.port == port)) {
       throw ArgumentError('$h:$port is already in the list');
     }
@@ -867,6 +880,7 @@ class IntercomCore {
       host: h,
       port: port,
       label: label.trim(),
+      altHost: alt,
     );
     _saved.add(s);
     _savedChanged();
@@ -874,17 +888,23 @@ class IntercomCore {
   }
 
   /// Saves a discovered peer (e.g. to give it a custom name).
-  SavedPeer saveLivePeer(String peerId, {String label = ''}) {
+  SavedPeer saveLivePeer(
+    String peerId, {
+    String label = '',
+    String altHost = '',
+  }) {
     final existing = _saved.where((s) => s.peerId == peerId).firstOrNull;
     if (existing != null) return existing;
     final p = _peers[peerId];
     if (p == null) throw ArgumentError('Unknown peer $peerId');
+    final alt = altHost.trim();
     final s = SavedPeer(
       key: _newKey(),
       host: p.address.address,
       port: p.port,
       label: label.trim(),
       peerId: peerId,
+      altHost: alt == p.address.address ? '' : alt,
     );
     _saved.add(s);
     _savedChanged();
@@ -897,10 +917,19 @@ class IntercomCore {
     String? label,
     String? host,
     int? port,
+    String? altHost,
   }) async {
     final s = _saved.where((e) => e.key == key).firstOrNull;
     if (s == null) return false;
     if (label != null) s.label = label.trim();
+    final newAlt = altHost?.trim();
+    if (newAlt != null &&
+        newAlt.isNotEmpty &&
+        newAlt == (host?.trim() ?? s.host)) {
+      throw ArgumentError('The alternate address is the same');
+    }
+    final altChanged = newAlt != null && newAlt != s.altHost;
+    if (altChanged) s.altHost = newAlt;
     final newHost = host?.trim();
     final addressChanged =
         (newHost != null && newHost.isNotEmpty && newHost != s.host) ||
@@ -922,8 +951,9 @@ class IntercomCore {
       s.peerId = null;
     }
     _savedChanged();
-    if (addressChanged) return _tryConnectSaved(s);
-    return _peers[s.peerId]?.online ?? false;
+    final online = _peers[s.peerId]?.online ?? false;
+    if (addressChanged || (altChanged && !online)) return _tryConnectSaved(s);
+    return online;
   }
 
   /// Removes a saved peer from the list (a discovered peer reappears as
@@ -1004,9 +1034,15 @@ class IntercomCore {
     if (_shutDown || !_savedConnecting.add(s.key)) return false;
     PeerConnection? conn;
     try {
-      final addrs = await _lookup(s.host);
-      if (addrs.isEmpty) return false;
-      conn = await _connectAny([for (final a in addrs) (a, s.port)]);
+      // Primary address first, then the alternate one.
+      final endpoints = <(InternetAddress, int)>[];
+      for (final h in s.hosts) {
+        for (final a in await _lookup(h)) {
+          if (!endpoints.any((e) => e.$1 == a)) endpoints.add((a, s.port));
+        }
+      }
+      if (endpoints.isEmpty) return false;
+      conn = await _connectAny(endpoints);
       if (_shutDown) {
         conn.close();
         return false;
@@ -1052,7 +1088,7 @@ class IntercomCore {
     var updated = false;
     for (final s in _saved) {
       if (s.peerId == null &&
-          s.host == p.address.address &&
+          s.hosts.contains(p.address.address) &&
           s.port == p.port &&
           !_saved.any((o) => o.peerId == p.id)) {
         s.peerId = p.id;
@@ -1066,6 +1102,7 @@ class IntercomCore {
       final isIp = InternetAddress.tryParse(s.host) != null;
       if (isIp &&
           p.online &&
+          p.address.address != s.altHost &&
           _sameNetwork(s.host, p.address.address) &&
           (s.host != p.address.address || s.port != p.port) &&
           !_saved.any(
@@ -1154,6 +1191,9 @@ class IntercomCore {
     'port': _server?.port ?? preferredPort,
     'v': protocolVersion,
     if (videoReceive) 'video': true,
+    // All our addresses (LAN, VPN, ...): peers try them when the one they
+    // know stops answering.
+    if (_localAddresses.isNotEmpty) 'addrs': _localAddresses.toList(),
   });
 
   /// Incoming connections whose HELLO we haven't answered yet.
@@ -1286,6 +1326,13 @@ class IntercomCore {
       p.connected = true;
       p.version = (m['v'] as int?) ?? 1;
       p.video = m['video'] == true;
+      final addrs = m['addrs'];
+      if (addrs is List) {
+        p.announced = [
+          for (final a in addrs.take(8))
+            if (a is String) ?InternetAddress.tryParse(a),
+        ].where((a) => a.type == InternetAddressType.IPv4).toList();
+      }
       p.wrongPassword = false;
       _resolveSaved(p);
       onHello?.call(id);
