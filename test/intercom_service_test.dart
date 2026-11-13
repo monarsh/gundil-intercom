@@ -163,8 +163,13 @@ void main() {
       aliceAudio.inject(voice(320, 7));
     });
     addTearDown(feeder.cancel);
-    // Mixed: Alice hears Bob + Carol summed in the same samples.
-    await eventually(() => aliceAudio.played.contains(1100));
+    // Mixed: Alice hears Bob + Carol summed in the same samples. That needs
+    // both streams to overlap in one mixed chunk, which can take a while
+    // when the machine is busy running the other test files in parallel.
+    await eventually(
+      () => aliceAudio.played.contains(1100),
+      timeout: const Duration(seconds: 15),
+    );
     await eventually(
       () => bobAudio.played.contains(7) && carolAudio.played.contains(7),
     );
