@@ -10,7 +10,8 @@ enum _PeerAction { edit, save, remove }
 /// who CONNECT opens a two-way line with; tapping another one switches.
 ///
 /// Saved peers (bookmark icon) stay in the list across restarts, even when
-/// offline. Every peer has a ⋮ menu to edit, save or remove it.
+/// offline. Every peer has a ⋮ menu to edit, save or remove it (online or
+/// offline).
 class PeerList extends StatelessWidget {
   const PeerList({super.key, required this.service, required this.onAddPeer});
 
@@ -191,14 +192,13 @@ class PeerList extends StatelessWidget {
               title: Text('Keep in list'),
             ),
           ),
-        if (e.isSaved)
-          const PopupMenuItem(
-            value: _PeerAction.remove,
-            child: ListTile(
-              leading: Icon(Icons.delete_outline),
-              title: Text('Remove'),
-            ),
+        const PopupMenuItem(
+          value: _PeerAction.remove,
+          child: ListTile(
+            leading: Icon(Icons.delete_outline),
+            title: Text('Remove'),
           ),
+        ),
       ],
     );
   }
@@ -255,13 +255,18 @@ class PeerList extends StatelessWidget {
   }
 
   Future<void> _remove(BuildContext context, PeerEntry e) async {
+    final known = e.peerId != null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Remove ${e.name}?'),
-        content: const Text(
-          'It is removed from your saved peers. If it is on the same network '
-          'it can still show up automatically while it is online.',
+        content: Text(
+          known
+              ? 'It disappears from the list, even while it is online, and '
+                    'can\'t connect to you. To get it back, add it again '
+                    'with "Add peer by IP", or use "Show removed peers" in '
+                    'Settings.'
+              : 'It is removed from your saved peers.',
         ),
         actions: [
           TextButton(
@@ -275,7 +280,9 @@ class PeerList extends StatelessWidget {
         ],
       ),
     );
-    if (ok == true) service.removeSavedPeer(e.saved!.key);
+    if (ok != true) return;
+    service.removePeer(e);
+    if (context.mounted) _snack(context, '${e.name} removed');
   }
 
   void _snack(BuildContext context, String msg, {bool error = false}) {

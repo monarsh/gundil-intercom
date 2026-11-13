@@ -95,9 +95,35 @@ void main() {
       Uint8List.sublistView(key.payload, 1),
       networkSecret(''),
     );
+    final opener = FrameCipher(keys.receiveKey);
+    // First an encrypted ping: Alice says who she is only after we did.
+    final first = await raw.read();
+    expect(first.type, MessageType.sealed);
+    expect(
+      MessageType.fromCode(opener.open(first.payload).$1),
+      MessageType.ping,
+    );
+    raw.send(
+      Frame(
+        MessageType.sealed,
+        FrameCipher(keys.sendKey).seal(
+          MessageType.hello.code,
+          Uint8List.fromList(
+            utf8.encode(
+              jsonEncode({
+                'id': 'raw-id',
+                'name': 'Raw',
+                'port': 1,
+                'v': protocolVersion,
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
     final sealed = await raw.read();
     expect(sealed.type, MessageType.sealed);
-    final (type, payload) = FrameCipher(keys.receiveKey).open(sealed.payload);
+    final (type, payload) = opener.open(sealed.payload);
     expect(MessageType.fromCode(type), MessageType.hello);
     expect(jsonDecode(utf8.decode(payload))['name'], 'Alice-Secret-Name');
     // ...but the name never appears in the raw bytes.

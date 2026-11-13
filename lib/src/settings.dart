@@ -123,6 +123,12 @@ class Settings {
     _prefs.remove('${_p}manualPeers');
   }
 
+  /// Device ids the user removed from the peer list (kept hidden).
+  List<String> get removedPeers =>
+      _prefs.getStringList('${_p}removedPeers') ?? const [];
+  set removedPeers(List<String> v) =>
+      _prefs.setStringList('${_p}removedPeers', v);
+
   static (String, int)? _parseLegacy(String s) {
     final i = s.lastIndexOf(':');
     if (i <= 0) return s.isEmpty ? null : (s, defaultTcpPort);

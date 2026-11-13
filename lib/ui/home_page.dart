@@ -272,6 +272,24 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                         : null,
                   ),
                 ],
+                if (service.removedPeers.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.restore),
+                    title: Text(
+                      'Show removed peers (${service.removedPeers.length})',
+                    ),
+                    subtitle: const Text(
+                      'Peers you removed come back to the list and can '
+                      'connect again.',
+                    ),
+                    onTap: () {
+                      service.restoreRemovedPeers();
+                      setLocal(() {});
+                    },
+                  ),
+                ],
                 const SizedBox(height: 16),
                 Text('This device', style: Theme.of(ctx).textTheme.titleSmall),
                 const SizedBox(height: 4),
