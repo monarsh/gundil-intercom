@@ -46,6 +46,8 @@ enum MessageType {
   hello(0x01),
 
   /// Open a two-way audio line: `{"sampleRate": 16000, "group": bool}`.
+  /// A group call adds `"groupId"`; `"join": true` means "I'm already in
+  /// that call, connect me with you" (accepted without ringing).
   open(0x02),
 
   /// Leave / hang up the line.
@@ -72,6 +74,19 @@ enum MessageType {
   /// pictures in flight per peer, so video never piles up in the TCP buffer
   /// and delays the audio.
   videoAck(0x0B),
+
+  /// A group's details (`Group.toJson`): sent to its members when it's
+  /// created or changed, and on connect to members whose copy is older.
+  group(0x0C),
+
+  /// In a group call: who the sender is directly connected with,
+  /// `{"groupId", "members": [{"id","name","port","addrs"}]}`. Members
+  /// connect to the ones they aren't connected to yet.
+  roster(0x0D),
+
+  /// In a group call: audio of a member the receiver can't reach directly,
+  /// forwarded by a member that reaches both: `[id length:1][id][PCM]`.
+  relayAudio(0x0E),
 
   /// Key exchange, the first frame each side sends and the only plaintext
   /// one: `[version:1][X25519 public key:32]`.

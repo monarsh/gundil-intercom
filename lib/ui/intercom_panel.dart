@@ -72,6 +72,13 @@ class IntercomPanel extends StatelessWidget {
     final online = switch (target) {
       EveryoneTarget() => service.onlinePeers.isNotEmpty,
       PeerTarget(:final peerId) => service.peer(peerId)?.online ?? false,
+      GroupTarget(:final groupId) =>
+        service
+                .group(groupId)
+                ?.members
+                .keys
+                .any((id) => service.peer(id)?.online ?? false) ??
+            false,
     };
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -81,13 +88,21 @@ class IntercomPanel extends StatelessWidget {
           color: online
               ? Colors.green.shade600
               : Theme.of(context).disabledColor,
-          icon: target is EveryoneTarget ? Icons.campaign : Icons.call,
+          icon: switch (target) {
+            EveryoneTarget() => Icons.campaign,
+            GroupTarget() => Icons.groups,
+            PeerTarget() => Icons.call,
+          },
           label: 'CONNECT',
           onTap: online ? service.connect : null,
         ),
         SizedBox(height: compact ? 10 : 20),
         Text(
-          online ? 'Talk with $targetName' : '$targetName is offline',
+          online
+              ? 'Talk with $targetName'
+              : target is GroupTarget
+              ? 'Nobody in $targetName is online'
+              : '$targetName is offline',
           textAlign: TextAlign.center,
           style: compact ? text.titleMedium : text.titleLarge,
         ),
@@ -115,7 +130,9 @@ class IntercomPanel extends StatelessWidget {
         Icon(Icons.ring_volume, size: compact ? 36 : 56, color: Colors.green),
         const SizedBox(height: 8),
         Text(
-          '$who wants to talk${conv.group ? ' (everyone)' : ''}',
+          conv.groupId != null
+              ? '$who is calling ${service.group(conv.groupId!)?.name ?? 'the group'}'
+              : '$who wants to talk${conv.group ? ' (everyone)' : ''}',
           textAlign: TextAlign.center,
           style: compact ? text.titleMedium : text.titleLarge,
         ),
@@ -149,14 +166,21 @@ class IntercomPanel extends StatelessWidget {
   Widget _active(BuildContext context, Conversation conv) {
     final text = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final connected = conv.connected.toList();
-    final calling = conv.calling.toList();
+    final connected = service.participants;
+    final calling = conv.calling
+        .where((id) => !conv.joining.contains(id))
+        .toList();
+    final groupName = conv.groupId == null
+        ? null
+        : service.group(conv.groupId!)?.name;
 
     final String status;
     String? timer;
     final speakers = service.speakers;
     if (connected.isEmpty) {
-      status = conv.group
+      status = groupName != null
+          ? 'Calling $groupName…'
+          : conv.group
           ? 'Connecting to everyone…'
           : 'Connecting to ${calling.map(service.displayName).join(', ')}…';
     } else {
@@ -176,8 +200,9 @@ class IntercomPanel extends StatelessWidget {
             : '${names.sublist(0, names.length - 1).join(', ')} and '
                   '${names.last} are speaking';
       } else {
-        status =
-            'Connected with ${connected.map(service.displayName).join(', ')}';
+        status = groupName != null
+            ? '$groupName: ${connected.map(service.displayName).join(', ')}'
+            : 'Connected with ${connected.map(service.displayName).join(', ')}';
       }
     }
 

@@ -24,6 +24,8 @@ Future<void> main() async {
     echoSuppression: settings.echoSuppression,
     savedPeers: settings.savedPeers,
     onSavedPeersChanged: (list) => settings.savedPeers = list,
+    groups: settings.groups,
+    onGroupsChanged: (list) => settings.groups = list,
   );
   await service.start();
   if (WindowBridge.supported) {

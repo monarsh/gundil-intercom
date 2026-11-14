@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math' as math;
@@ -93,6 +94,8 @@ class IntercomCore {
     bool? echoSuppression,
     List<SavedPeer> savedPeers = const [],
     this.onSavedPeersChanged,
+    List<Group> groups = const [],
+    this.onGroupsChanged,
     this.reconnectInterval = const Duration(seconds: 5),
     this.hooks = const PlatformHooks(),
   }) : _name = name, // ignore: prefer_initializing_formals
@@ -100,6 +103,7 @@ class IntercomCore {
        _speakerVolume = speakerVolume.clamp(0.0, maxVolume),
        _micVolume = micVolume.clamp(0.0, maxVolume),
        _saved = [...savedPeers],
+       _groups = {for (final g in groups) g.id: g},
        // Android uses the phone's hardware echo canceller instead.
        echoSuppression = echoSuppression ?? !Platform.isAndroid,
        _mixer = AudioMixer(sampleRate: sampleRate),
@@ -129,6 +133,9 @@ class IntercomCore {
 
   /// Called whenever the saved peer list changes, so it can be persisted.
   final void Function(List<SavedPeer> saved)? onSavedPeersChanged;
+
+  /// Called whenever the groups change, so they can be persisted.
+  final void Function(List<Group> groups)? onGroupsChanged;
 
   /// How often offline saved peers are retried.
   final Duration reconnectInterval;
@@ -219,6 +226,14 @@ class IntercomCore {
   final Set<String> _relinking = {};
 
   final List<SavedPeer> _saved;
+  final Map<String, Group> _groups;
+
+  /// Tests only: device ids we pretend we can't connect to (no route).
+  final Set<String> debugUnreachable = {};
+
+  /// How to reach group call members we may not know yet (from rosters).
+  final Map<String, ({String name, int port, List<InternetAddress> addrs})>
+  _dialInfo = {};
 
   final Set<String> _savedConnecting = {};
 
@@ -307,11 +322,28 @@ class IntercomCore {
     return heard != null && DateTime.now().difference(heard) > relinkAfter;
   }
 
-  /// Connected peers that are talking right now.
+  /// Call members that are talking right now.
   List<String> get speakers => [
-    for (final id in _conversation?.connected ?? const <String>[])
+    for (final id in participants)
       if (isSpeaking(id)) id,
   ];
+
+  /// Everyone we're talking with: the connected members plus, in a group
+  /// call, the members connected to them (heard through them if we can't
+  /// reach them directly).
+  List<String> get participants {
+    final conv = _conversation;
+    if (conv == null) return const [];
+    final out = conv.connected.toList();
+    if (conv.groupId != null) {
+      for (final r in conv.rosters.values) {
+        for (final id in r) {
+          if (id != selfId && !out.contains(id)) out.add(id);
+        }
+      }
+    }
+    return out;
+  }
 
   /// Whether we are talking (microphone above the voice threshold).
   bool get selfSpeaking =>
@@ -425,13 +457,20 @@ class IntercomCore {
     for (final s in _saved) {
       if (s.peerId == peerId && s.label.trim().isNotEmpty) return s.label;
     }
-    return _peers[peerId]?.name ?? 'Unknown';
+    final known = _peers[peerId]?.name ?? _dialInfo[peerId]?.name;
+    if (known != null) return known;
+    for (final g in _groups.values) {
+      final n = g.members[peerId];
+      if (n != null && n.isNotEmpty) return n;
+    }
+    return 'Unknown';
   }
 
   /// Human readable name of [target].
   String targetName(TalkTarget t) => switch (t) {
     EveryoneTarget() => 'Everyone',
     PeerTarget(:final peerId) => displayName(peerId),
+    GroupTarget(:final groupId) => _groups[groupId]?.name ?? 'Group',
   };
 
   // -------------------------------------------------------------- lifecycle
@@ -718,6 +757,9 @@ class IntercomCore {
   /// Opens a link to [p], trying every address it was seen at (and the
   /// saved one), a little apart so the newest wins when several work.
   Future<PeerConnection> _dial(Peer p) async {
+    if (debugUnreachable.contains(p.id)) {
+      throw const SocketException('unreachable (test)');
+    }
     final out = <(InternetAddress, int)>[];
     void add(InternetAddress a, int port) {
       if (a.type != InternetAddressType.IPv4) return; // We listen on IPv4.
@@ -978,6 +1020,279 @@ class IntercomCore {
     changed();
   }
 
+  // ---------------------------------------------------------------- groups
+
+  /// Our groups, by name.
+  List<Group> get groups =>
+      _groups.values.toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+  Group? group(String id) => _groups[id];
+
+  /// Creates a group with us and [memberIds] and tells them (the ones
+  /// offline get it the next time they connect to any member).
+  Group createGroup(String name, Iterable<String> memberIds) {
+    final n = name.trim();
+    if (n.isEmpty) throw ArgumentError('The group needs a name');
+    final g = Group(
+      id: _newKey(),
+      name: n,
+      members: {selfId: _name, for (final id in memberIds) id: displayName(id)},
+      updated: DateTime.now().millisecondsSinceEpoch,
+      owner: selfId,
+    );
+    _setGroup(g);
+    _shareGroup(g, g.members.keys);
+    return g;
+  }
+
+  /// Renames group [id] and/or changes who is in it (we stay in it; use
+  /// [leaveGroup] to leave). Every member, old and new, is told.
+  void updateGroup(String id, {String? name, Iterable<String>? memberIds}) {
+    final old = _groups[id];
+    if (old == null) return;
+    final n = name?.trim();
+    if (n != null && n.isEmpty) throw ArgumentError('The group needs a name');
+    final members = memberIds == null
+        ? {...old.members, selfId: _name}
+        : {
+            selfId: _name,
+            for (final m in memberIds)
+              if (m != selfId)
+                m: old.members[m]?.isNotEmpty ?? false
+                    ? (_peers[m]?.name ?? old.members[m]!)
+                    : displayName(m),
+          };
+    final g = old.copyWith(name: n, members: members);
+    _setGroup(g);
+    _shareGroup(g, {...old.members.keys, ...g.members.keys});
+    // Removed members leave the call.
+    final conv = _conversation;
+    if (conv != null && conv.groupId == id) {
+      for (final m in conv.members.keys.toList()) {
+        if (!g.members.containsKey(m)) {
+          _send(m, Frame.empty(MessageType.close));
+          _removeMember(m, quiet: true);
+        }
+      }
+    }
+  }
+
+  /// Leaves group [id]: the other members are told, and it's gone here.
+  void leaveGroup(String id) {
+    final old = _groups[id];
+    if (old == null) return;
+    final g = old.copyWith(members: {...old.members}..remove(selfId));
+    _shareGroup(g, g.members.keys);
+    _dropGroup(id);
+  }
+
+  void _dropGroup(String id) {
+    _groups.remove(id);
+    if (_conversation?.groupId == id) hangUp();
+    if (_target == GroupTarget(id)) _target = const EveryoneTarget();
+    onGroupsChanged?.call(groups);
+    changed();
+  }
+
+  void _setGroup(Group g) {
+    _groups[g.id] = g;
+    onGroupsChanged?.call(groups);
+    changed();
+  }
+
+  /// Sends [g] to the peers [to] that are online (connecting if needed).
+  void _shareGroup(Group g, Iterable<String> to) {
+    final frame = Frame.json(MessageType.group, g.toJson());
+    for (final id in to.toSet()) {
+      if (id == selfId) continue;
+      final link = _links[id];
+      if (link != null && !link.isClosed) {
+        link.send(frame);
+        continue;
+      }
+      final p = _peers[id];
+      if (p == null || !p.online || p.outdated) continue;
+      _linkTo(p).then((c) => c.send(frame), onError: (Object _) {});
+    }
+  }
+
+  /// A peer sent a group's details: keep them if they're newer.
+  void _onGroup(String from, Map<String, Object?> m) {
+    final g = Group.fromJson(m);
+    if (g == null) return;
+    final old = _groups[g.id];
+    if (old != null && !g.newerThan(old)) {
+      // Theirs is out of date: send ours back.
+      if (old.newerThan(g)) {
+        _send(from, Frame.json(MessageType.group, old.toJson()));
+      }
+      return;
+    }
+    // Only a member may change a group.
+    if (!(old ?? g).members.containsKey(from)) return;
+    final inIt = g.members.containsKey(selfId);
+    if (old == null && !inIt) return;
+    if (!inIt) {
+      _emit('${displayName(from)} removed you from ${g.name}');
+      _dropGroup(g.id);
+      return;
+    }
+    _setGroup(g);
+    if (old == null) {
+      _emit('${displayName(from)} added you to the group ${g.name}');
+    }
+    // Pass it on to the other members we're connected with.
+    final frame = Frame.json(MessageType.group, g.toJson());
+    for (final id in {...g.members.keys, ...?old?.members.keys}) {
+      if (id == selfId || id == from) continue;
+      _send(id, frame);
+    }
+  }
+
+  /// On connect: sends [id] our groups that it's in (or had) where its copy
+  /// ([theirs]: group id → updated, from its HELLO) is older or missing.
+  void _syncGroups(String id, Object? theirs) {
+    final known = theirs is Map ? theirs : const {};
+    for (final g in _groups.values) {
+      final t = known[g.id];
+      final has = t is int;
+      if (!has && !g.members.containsKey(id)) continue;
+      if (has && t >= g.updated) continue;
+      _send(id, Frame.json(MessageType.group, g.toJson()));
+    }
+  }
+
+  /// Group call: tells every connected member who we're connected with,
+  /// so they connect to the ones they aren't connected to yet.
+  void _sendRoster(Conversation conv) {
+    final gid = conv.groupId;
+    if (gid == null || !identical(_conversation, conv)) return;
+    final frame = Frame.json(MessageType.roster, {
+      'groupId': gid,
+      'members': [
+        for (final id in conv.connected)
+          if (_peers[id] case final p?)
+            {
+              'id': id,
+              'name': p.name,
+              'port': p.port,
+              'addrs': {
+                p.address.address,
+                for (final a in p.announced) a.address,
+              }.toList(),
+            },
+      ],
+    });
+    for (final id in conv.connected) {
+      _send(id, frame);
+    }
+  }
+
+  void _onRoster(String from, Map<String, Object?> m) {
+    final conv = _conversation;
+    if (conv == null ||
+        conv.groupId == null ||
+        m['groupId'] != conv.groupId ||
+        conv.members[from] != MemberState.connected) {
+      return;
+    }
+    final group = _groups[conv.groupId];
+    final ids = <String>{};
+    for (final e in (m['members'] as List?) ?? const []) {
+      if (e is! Map) continue;
+      final id = e['id'], port = e['port'], addrs = e['addrs'];
+      if (id is! String || id.isEmpty) continue;
+      // Only members of the group may join its call.
+      if (id != selfId && !(group?.members.containsKey(id) ?? false)) continue;
+      ids.add(id);
+      if (id == selfId || port is! int || addrs is! List) continue;
+      _dialInfo[id] = (
+        name: e['name'] is String ? e['name'] as String : displayName(id),
+        port: port,
+        addrs: [
+          for (final a in addrs.take(8))
+            if (a is String) ?InternetAddress.tryParse(a),
+        ].where((a) => a.type == InternetAddressType.IPv4).toList(),
+      );
+    }
+    final before = conv.rosters[from];
+    conv.rosters[from] = ids;
+    _joinMissing(conv);
+    if (before == null ||
+        before.length != ids.length ||
+        !before.containsAll(ids)) {
+      changed();
+    }
+  }
+
+  /// Group call: connects to members that others are connected with but we
+  /// aren't (retried every [joinRetry] while they stay unreachable; meanwhile
+  /// we hear them through a member that reaches both).
+  void _joinMissing(Conversation conv) {
+    if (!conv.isConnected) return;
+    final now = DateTime.now();
+    for (final r in conv.rosters.values.toList()) {
+      for (final id in r) {
+        if (id == selfId || conv.members.containsKey(id)) continue;
+        final tried = conv.joinTried[id];
+        if (tried != null && now.difference(tried) < joinRetry) continue;
+        _joinMember(conv, id);
+      }
+    }
+  }
+
+  static const Duration joinRetry = Duration(seconds: 15);
+
+  Future<void> _joinMember(Conversation conv, String id) async {
+    conv.joinTried[id] = DateTime.now();
+    final info = _dialInfo[id];
+    var p = _peers[id];
+    if (p == null) {
+      if (info == null || info.addrs.isEmpty) return;
+      // Someone we haven't met: dial where the others see it. It joins
+      // the list once it answers.
+      p = Peer(
+        id: id,
+        name: info.name,
+        platform: '?',
+        address: info.addrs.first,
+        port: info.port,
+      );
+      for (final a in info.addrs.reversed) {
+        p.noteEndpoint(a, info.port);
+      }
+      p.announced = info.addrs;
+    } else if (info != null) {
+      p.announced = {...p.announced, ...info.addrs}.toList();
+    }
+    if (p.outdated) return;
+    conv.members[id] = MemberState.calling;
+    conv.invitedAt[id] = DateTime.now();
+    conv.joining.add(id);
+    changed();
+    try {
+      final link = await _linkTo(p);
+      if (!identical(_conversation, conv) ||
+          conv.members[id] != MemberState.calling) {
+        return;
+      }
+      link.send(
+        Frame.json(MessageType.open, {
+          'sampleRate': sampleRate,
+          'group': true,
+          'groupId': conv.groupId,
+          'join': true,
+        }),
+      );
+    } catch (_) {
+      if (identical(_conversation, conv) &&
+          conv.members[id] == MemberState.calling) {
+        _removeMember(id, quiet: true);
+      }
+    }
+  }
+
   /// Drops everything known about [id] and closes its connections.
   void _forget(String id) {
     _peers.remove(id);
@@ -1171,6 +1486,8 @@ class IntercomCore {
     // All our addresses (LAN, VPN, ...): peers try them when the one they
     // know stops answering.
     if (_localAddresses.isNotEmpty) 'addrs': _localAddresses.toList(),
+    // Which groups we have and how recent: the peer sends newer copies.
+    'groups': {for (final g in _groups.values) g.id: g.updated},
   });
 
   /// Incoming connections whose HELLO we haven't answered yet.
@@ -1308,6 +1625,7 @@ class IntercomCore {
       }
       p.wrongPassword = false;
       _resolveSaved(p);
+      _syncGroups(id, m['groups']);
       onHello?.call(id);
       changed();
       return;
@@ -1338,6 +1656,12 @@ class IntercomCore {
         _onVideo(c, id, f.payload);
       case MessageType.videoAck:
         _onVideoAck(id);
+      case MessageType.group:
+        _onGroup(id, f.json);
+      case MessageType.roster:
+        _onRoster(id, f.json);
+      case MessageType.relayAudio:
+        _onRelayAudio(id, f.payload);
       case MessageType.key || MessageType.sealed:
         break; // Handled by PeerConnection.
     }
@@ -1388,14 +1712,19 @@ class IntercomCore {
     final recipients = switch (target) {
       EveryoneTarget() => onlinePeers,
       PeerTarget(:final peerId) => [?_peers[peerId]],
+      GroupTarget(:final groupId) => [
+        for (final id in _groups[groupId]?.members.keys ?? const <String>[])
+          if (id != selfId) ?_peers[id],
+      ],
     }.where((p) => p.online).toList();
     if (recipients.isEmpty) {
-      _emit(
-        target is EveryoneTarget
-            ? 'Nobody is online'
-            : '${targetName(target)} is offline',
-        error: true,
-      );
+      _emit(switch (target) {
+        EveryoneTarget() => 'Nobody is online',
+        GroupTarget() when !_groups.containsKey(target.groupId) =>
+          'That group no longer exists',
+        GroupTarget() => 'Nobody in ${targetName(target)} is online',
+        PeerTarget() => '${targetName(target)} is offline',
+      }, error: true);
       return;
     }
     final outdated = recipients.where((p) => p.outdated).toList();
@@ -1422,7 +1751,11 @@ class IntercomCore {
       hangUp();
     }
 
-    final conv = Conversation(group: target is EveryoneTarget, outgoing: true);
+    final conv = Conversation(
+      group: target is! PeerTarget,
+      outgoing: true,
+      groupId: target is GroupTarget ? target.groupId : null,
+    );
     _conversation = conv;
     final now = DateTime.now();
     for (final p in recipients) {
@@ -1434,6 +1767,7 @@ class IntercomCore {
     final open = Frame.json(MessageType.open, {
       'sampleRate': sampleRate,
       'group': conv.group,
+      'groupId': ?conv.groupId,
     });
     await Future.wait(
       recipients.map((p) async {
@@ -1509,6 +1843,12 @@ class IntercomCore {
       _send(id, Frame.json(MessageType.reject, {'reason': 'unsupported'}));
       return;
     }
+    final gid = m['groupId'] is String ? m['groupId'] as String : null;
+    if (gid != null && !_groups.containsKey(gid)) {
+      // We left that group (or haven't got it yet).
+      _send(id, Frame.json(MessageType.reject, {'reason': 'notMember'}));
+      return;
+    }
     final conv = _conversation;
     if (conv != null) {
       final state = conv.members[id];
@@ -1519,10 +1859,31 @@ class IntercomCore {
         return;
       }
       if (state != null) return; // Already ringing / connected.
+      if (gid != null && conv.groupId == gid) {
+        // Another member of the group call we're in (or starting).
+        if (conv.isConnected || conv.outgoing) {
+          _send(id, Frame.empty(MessageType.accept));
+          _setConnected(id);
+        } else {
+          conv.members[id] = MemberState.ringing;
+          conv.invitedAt[id] = DateTime.now();
+          changed();
+        }
+        return;
+      }
       _send(id, Frame.json(MessageType.reject, {'reason': 'busy'}));
       return;
     }
-    final next = Conversation(group: m['group'] == true, outgoing: false);
+    if (m['join'] == true) {
+      // A member connecting to everyone in a call we're not in.
+      _send(id, Frame.json(MessageType.reject, {'reason': 'notInCall'}));
+      return;
+    }
+    final next = Conversation(
+      group: m['group'] == true || gid != null,
+      outgoing: false,
+      groupId: gid,
+    );
     next.members[id] = MemberState.ringing;
     next.invitedAt[id] = DateTime.now();
     _conversation = next;
@@ -1530,7 +1891,9 @@ class IntercomCore {
       accept();
     } else {
       _emit(
-        '${displayName(id)} wants to talk',
+        gid != null
+            ? '${displayName(id)} is calling ${_groups[gid]!.name}'
+            : '${displayName(id)} wants to talk',
         kind: IntercomEventKind.ringing,
         peerId: id,
       );
@@ -1592,11 +1955,13 @@ class IntercomCore {
       _startAudio();
       if (rogerBeep && _audioRunning) _playTone(connectTone(sampleRate));
     }
+    conv.joining.remove(id);
     _emit(
       '${displayName(id)} connected',
       kind: IntercomEventKind.connected,
       peerId: id,
     );
+    _sendRoster(conv);
     changed();
   }
 
@@ -1608,6 +1973,9 @@ class IntercomCore {
     conv.members.remove(id);
     conv.lastHeard.remove(id);
     conv.invitedAt.remove(id);
+    conv.rosters.remove(id);
+    final joining = conv.joining.remove(id);
+    if (joining) quiet = true;
     _mixer.remove(id);
     _clearLevels(id);
     _videoInFlight.remove(id);
@@ -1622,6 +1990,7 @@ class IntercomCore {
       if (reason != null && !quiet && conv.group) {
         _emit(reason, kind: kind, peerId: id);
       }
+      if (wasConnected) _sendRoster(conv);
       changed();
     }
   }
@@ -1673,6 +2042,19 @@ class IntercomCore {
         videoChanged(id);
       }
     }
+    if (conv.groupId != null) {
+      for (final id in conv.relayed.keys.toList()) {
+        if (now.difference(conv.relayed[id]!) > const Duration(seconds: 3)) {
+          conv.relayed.remove(id);
+          if (conv.members[id] != MemberState.connected) {
+            _mixer.remove(id);
+            _clearLevels(id);
+          }
+        }
+      }
+      if (++_rosterTick % 5 == 0) _sendRoster(conv);
+      _joinMissing(conv);
+    }
     for (final entry in conv.members.entries.toList()) {
       final id = entry.key;
       switch (entry.value) {
@@ -1696,6 +2078,8 @@ class IntercomCore {
       }
     }
   }
+
+  int _rosterTick = 0;
 
   void _heard(String id) {
     final conv = _conversation;
@@ -1722,6 +2106,64 @@ class IntercomCore {
     _levelAt[id] = now;
     if (level >= speakingThreshold) _voiceAt[id] = now;
     if (_audioRunning) _mixer.add(id, samples);
+    if (conv.groupId != null) _relay(conv, id, payload);
+  }
+
+  /// Group call: forwards [src]'s audio to the members that can't reach
+  /// [src] directly. Of all members connected to both, the one with the
+  /// lowest id does it, so it arrives once.
+  void _relay(Conversation conv, String src, Uint8List pcm) {
+    final srcRoster = conv.rosters[src] ?? const <String>{};
+    Frame? frame;
+    for (final m in conv.connected) {
+      if (m == src) continue;
+      final r = conv.rosters[m];
+      // Unknown yet (or an older version), or it hears [src] itself.
+      if (r == null || r.contains(src)) continue;
+      var relay = selfId;
+      for (final c in srcRoster) {
+        if (c != m && r.contains(c) && c.compareTo(relay) < 0) relay = c;
+      }
+      if (relay != selfId) continue;
+      frame ??= () {
+        final idBytes = utf8.encode(src);
+        return Frame(
+          MessageType.relayAudio,
+          Uint8List(1 + idBytes.length + pcm.length)
+            ..[0] = idBytes.length
+            ..setRange(1, 1 + idBytes.length, idBytes)
+            ..setRange(
+              1 + idBytes.length,
+              1 + idBytes.length + pcm.length,
+              pcm,
+            ),
+        );
+      }();
+      _send(m, frame);
+    }
+  }
+
+  void _onRelayAudio(String from, Uint8List payload) {
+    final conv = _conversation;
+    if (conv == null ||
+        conv.groupId == null ||
+        conv.members[from] != MemberState.connected ||
+        payload.isEmpty) {
+      return;
+    }
+    final n = payload[0];
+    if (n == 0 || payload.length < 1 + n) return;
+    final src = utf8.decode(payload.sublist(1, 1 + n), allowMalformed: true);
+    // Ours echoed back, or someone we hear directly anyway.
+    if (src == selfId || conv.members[src] == MemberState.connected) return;
+    final now = DateTime.now();
+    conv.relayed[src] = now;
+    final samples = bytesToPcm(Uint8List.sublistView(payload, 1 + n));
+    final level = rmsLevel(samples);
+    _peerLevel[src] = level;
+    _levelAt[src] = now;
+    if (level >= speakingThreshold) _voiceAt[src] = now;
+    if (_audioRunning) _mixer.add(src, samples);
   }
 
   // ------------------------------------------------------------------ video

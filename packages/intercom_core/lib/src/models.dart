@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'protocol.dart';
 
@@ -192,6 +193,93 @@ class PeerTarget extends TalkTarget {
   int get hashCode => peerId.hashCode;
 }
 
+/// Every member of a group: they all hear each other.
+class GroupTarget extends TalkTarget {
+  const GroupTarget(this.groupId);
+  final String groupId;
+  @override
+  bool operator ==(Object other) =>
+      other is GroupTarget && other.groupId == groupId;
+  @override
+  int get hashCode => groupId.hashCode ^ 0x5a5a;
+}
+
+/// A named group of intercoms (like a group chat). Any member can call it:
+/// everyone online joins one conversation where all hear each other. Every
+/// member keeps a copy; changes spread to the others (newest wins).
+class Group {
+  Group({
+    required this.id,
+    required this.name,
+    required Map<String, String> members,
+    required this.updated,
+    this.owner = '',
+  }) : members = Map.unmodifiable(members);
+
+  final String id;
+  final String name;
+
+  /// Device id → name, including ours.
+  final Map<String, String> members;
+
+  /// When it last changed (ms since epoch): the newest copy wins.
+  final int updated;
+
+  /// Device id of whoever created it.
+  final String owner;
+
+  Group copyWith({String? name, Map<String, String>? members}) => Group(
+    id: id,
+    name: name ?? this.name,
+    members: members ?? this.members,
+    updated: math.max(DateTime.now().millisecondsSinceEpoch, updated + 1),
+    owner: owner,
+  );
+
+  /// Whether this copy replaces [other] (same id).
+  bool newerThan(Group other) =>
+      updated > other.updated ||
+      (updated == other.updated && _sig.compareTo(other._sig) > 0);
+
+  String get _sig => '$name|${(members.keys.toList()..sort()).join(',')}';
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'members': [
+      for (final e in members.entries) {'id': e.key, 'name': e.value},
+    ],
+    'updated': updated,
+    'owner': owner,
+  };
+
+  static Group? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final id = j['id'], name = j['name'], list = j['members'];
+    final updated = j['updated'];
+    if (id is! String || id.isEmpty || id.length > 64) return null;
+    if (name is! String || list is! List || updated is! int) return null;
+    final members = <String, String>{};
+    for (final m in list.take(maxMembers)) {
+      if (m is! Map) continue;
+      final mid = m['id'], mname = m['name'];
+      if (mid is String && mid.isNotEmpty && mid.length <= 64) {
+        members[mid] = mname is String ? mname : '';
+      }
+    }
+    final owner = j['owner'];
+    return Group(
+      id: id,
+      name: name.length > 64 ? name.substring(0, 64) : name,
+      members: members,
+      updated: updated,
+      owner: owner is String ? owner : '',
+    );
+  }
+
+  static const int maxMembers = 32;
+}
+
 /// State of one peer in the current conversation.
 enum MemberState {
   /// We asked them to join; waiting for their answer.
@@ -206,10 +294,26 @@ enum MemberState {
 
 /// The current two-way audio line (one at a time).
 class Conversation {
-  Conversation({required this.group, required this.outgoing});
+  Conversation({required this.group, required this.outgoing, this.groupId});
 
-  /// Started with "Everyone" (we are the hub and hear all members mixed).
+  /// Started with "Everyone" or a group (several members).
   final bool group;
+
+  /// A call of this [Group]: every member connects to every other one, so
+  /// all hear each other.
+  final String? groupId;
+
+  /// Group call: who each connected member is directly connected with.
+  final Map<String, Set<String>> rosters = {};
+
+  /// Group call: members we only hear through another member, and when.
+  final Map<String, DateTime> relayed = {};
+
+  /// Group call: members we were asked to connect to, and when we tried.
+  final Map<String, DateTime> joinTried = {};
+
+  /// Members we're connecting to because they're in the call (no ringing).
+  final Set<String> joining = {};
 
   /// We started it.
   final bool outgoing;

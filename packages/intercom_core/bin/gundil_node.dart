@@ -66,6 +66,8 @@ Future<void> main(List<String> args) async {
     micVolume: (cfg.integer('mic-volume') ?? 100) / 100,
     savedPeers: saved,
     onSavedPeersChanged: (list) => state.save(saved: list),
+    groups: state.groups,
+    onGroupsChanged: (list) => state.save(groups: list),
   );
 
   // Fail early (with a clear message) if the audio library or devices are
@@ -152,7 +154,7 @@ Future<void> main(List<String> args) async {
   if (stdin.hasTerminal) {
     log(
       'Keys: [Enter] connect / accept / hang up · a = accept · d = decline · '
-      'm = mute · l = list peers · t <name|everyone> = who to connect to · '
+      'm = mute · l = list peers · t <name|group|everyone> = who to connect to · '
       'q = quit',
     );
     stdin
@@ -319,9 +321,12 @@ class _Node {
         return PeerTarget(e.peerId!);
       }
     }
+    for (final g in core.groups) {
+      if (g.name.toLowerCase() == want) return GroupTarget(g.id);
+    }
     log(
       'ERROR: no peer named "$targetName" '
-      '(known: ${core.entries.map((e) => e.name).join(', ')})',
+      '(known: ${[...core.entries.map((e) => e.name), ...core.groups.map((g) => g.name)].join(', ')})',
     );
     return null;
   }
@@ -352,6 +357,9 @@ class _Node {
           '${e.live?.wrongPassword ?? false ? '  (different password)' : ''}',
         );
       }
+      for (final g in core.groups) {
+        log('  ▣ ${g.name} (group of ${g.members.length})');
+      }
       log('Button connects to: $targetName');
     } else if (cmd.startsWith('t ')) {
       targetName = cmd.substring(2).trim();
@@ -364,16 +372,18 @@ class _Node {
 
 /// Persistent identity and learned peers.
 class _NodeState {
-  _NodeState(this.file, this.deviceId, this.saved);
+  _NodeState(this.file, this.deviceId, this.saved, this.groups);
 
   final File file;
   final String deviceId;
-  final List<SavedPeer> saved;
+  List<SavedPeer> saved;
+  List<Group> groups;
 
   static _NodeState load(String? path) {
     final file = File(path ?? _defaultStatePath());
     String? id;
     var saved = <SavedPeer>[];
+    var groups = <Group>[];
     try {
       final json = jsonDecode(file.readAsStringSync());
       if (json is Map) {
@@ -381,6 +391,10 @@ class _NodeState {
         final list = json['savedPeers'];
         if (list is List) {
           saved = list.map(SavedPeer.fromJson).whereType<SavedPeer>().toList();
+        }
+        final g = json['groups'];
+        if (g is List) {
+          groups = g.map(Group.fromJson).whereType<Group>().toList();
         }
       }
     } catch (_) {}
@@ -391,18 +405,21 @@ class _NodeState {
         (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0'),
       ).join();
     }
-    final s = _NodeState(file, id, saved);
-    s.save(saved: saved);
+    final s = _NodeState(file, id, saved, groups);
+    s.save();
     return s;
   }
 
-  void save({required List<SavedPeer> saved}) {
+  void save({List<SavedPeer>? saved, List<Group>? groups}) {
+    if (saved != null) this.saved = saved;
+    if (groups != null) this.groups = groups;
     try {
       file.parent.createSync(recursive: true);
       file.writeAsStringSync(
         const JsonEncoder.withIndent('  ').convert({
           'deviceId': deviceId,
-          'savedPeers': [for (final s in saved) s.toJson()],
+          'savedPeers': [for (final s in this.saved) s.toJson()],
+          'groups': [for (final g in this.groups) g.toJson()],
         }),
       );
     } catch (e) {
@@ -458,6 +475,6 @@ default ${NodeConfig.defaultPath}):''');
   --help                   Show this help
 
 When run in a terminal: Enter = connect / accept / hang up, "a" accept,
-"d" decline, "m" mute, "l" list peers, "t <name>" choose who the button
+"d" decline, "m" mute, "l" list peers, "t <name|group>" choose who the button
 connects to, "q" quit.''');
 }

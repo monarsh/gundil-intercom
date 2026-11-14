@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../src/intercom_service.dart';
+import 'group_dialog.dart';
 import 'peer_dialog.dart';
 import 'widgets.dart';
 
 enum _PeerAction { edit, save, remove }
+
+enum _GroupAction { edit, leave }
 
 /// Channel selector: "Everyone" plus every known peer. The selected entry is
 /// who CONNECT opens a two-way line with; tapping another one switches.
@@ -29,6 +32,34 @@ class PeerList extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
             _everyone(context, online),
+            const Divider(indent: 16, endIndent: 16),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 4, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Groups',
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => _newGroup(context),
+                    icon: const Icon(Icons.group_add, size: 18),
+                    label: const Text('New'),
+                  ),
+                ],
+              ),
+            ),
+            if (service.groups.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  'Make a group so several peers can talk together.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            for (final g in service.groups) _groupTile(context, g),
             const Divider(indent: 16, endIndent: 16),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 4, 0),
@@ -62,7 +93,8 @@ class PeerList extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final selected = service.target is EveryoneTarget;
     final conv = service.conversation;
-    final groupActive = conv != null && conv.group && conv.outgoing;
+    final groupActive =
+        conv != null && conv.group && conv.groupId == null && conv.outgoing;
     return ListTile(
       selected: selected,
       selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.6),
@@ -86,6 +118,110 @@ class PeerList extends StatelessWidget {
       ),
       onTap: () => service.selectTarget(const EveryoneTarget()),
     );
+  }
+
+  Widget _groupTile(BuildContext context, Group g) {
+    final scheme = Theme.of(context).colorScheme;
+    final target = GroupTarget(g.id);
+    final selected = service.target == target;
+    final others = g.members.keys.where((id) => id != service.selfId).toList();
+    final online = others.where((id) => service.peer(id)?.online ?? false);
+    final conv = service.conversation;
+    final inCall = conv != null && conv.groupId == g.id;
+    final names = others.map(service.displayName).join(', ');
+    return ListTile(
+      selected: selected,
+      selectedTileColor: scheme.secondaryContainer.withValues(alpha: 0.6),
+      leading: CircleAvatar(
+        radius: 22,
+        backgroundColor: scheme.primaryContainer,
+        foregroundColor: scheme.onPrimaryContainer,
+        child: const Icon(Icons.groups),
+      ),
+      title: Text(g.name, overflow: TextOverflow.ellipsis),
+      subtitle: Text(
+        inCall && conv.isConnected
+            ? 'In call · ${service.participants.length + 1} talking'
+            : '${online.length} of ${others.length} online · $names',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (inCall)
+            const Icon(Icons.call, color: Colors.green)
+          else
+            _radio(selected),
+          PopupMenuButton<_GroupAction>(
+            tooltip: 'Group options',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (a) => switch (a) {
+              _GroupAction.edit => _editGroup(context, g),
+              _GroupAction.leave => _leaveGroup(context, g),
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: _GroupAction.edit,
+                child: ListTile(
+                  leading: Icon(Icons.edit),
+                  title: Text('Edit / invite…'),
+                ),
+              ),
+              PopupMenuItem(
+                value: _GroupAction.leave,
+                child: ListTile(
+                  leading: Icon(Icons.logout),
+                  title: Text('Leave group'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+      onTap: () => service.selectTarget(target),
+      onLongPress: () => _editGroup(context, g),
+    );
+  }
+
+  Future<void> _newGroup(BuildContext context) async {
+    final r = await showGroupDialog(context, service: service);
+    if (r == null) return;
+    final g = service.createGroup(r.name, r.members);
+    service.selectTarget(GroupTarget(g.id));
+    if (context.mounted) {
+      _snack(context, 'Group ${g.name} created. Members get it too.');
+    }
+  }
+
+  Future<void> _editGroup(BuildContext context, Group g) async {
+    final r = await showGroupDialog(context, service: service, group: g);
+    if (r == null) return;
+    service.updateGroup(g.id, name: r.name, memberIds: r.members);
+  }
+
+  Future<void> _leaveGroup(BuildContext context, Group g) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Leave ${g.name}?'),
+        content: const Text(
+          'It is removed from your list and the other members are told. '
+          'A member can invite you again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Leave'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) service.leaveGroup(g.id);
   }
 
   Widget _tile(BuildContext context, PeerEntry e) {

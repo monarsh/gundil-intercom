@@ -123,6 +123,24 @@ class Settings {
     _prefs.remove('${_p}manualPeers');
   }
 
+  /// Groups we're in (see [Group]).
+  List<Group> get groups {
+    final raw = _prefs.getString('${_p}groups');
+    if (raw == null) return [];
+    try {
+      final list = jsonDecode(raw);
+      if (list is List) {
+        return list.map(Group.fromJson).whereType<Group>().toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  set groups(List<Group> v) => _prefs.setString(
+    '${_p}groups',
+    jsonEncode([for (final g in v) g.toJson()]),
+  );
+
   /// Drops the hidden-peer list that 1.5.5–1.5.6 kept (no longer used).
   void forgetRemovedPeers() => _prefs.remove('${_p}removedPeers');
 

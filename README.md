@@ -28,6 +28,14 @@ call, Android, Windows and Linux can also turn on their **camera** for video.
   **Accept / Decline** instead. While ringing, your microphone stays off.
 - **Talk to one peer or to Everyone**: *Everyone* connects to all online
   intercoms at once. You hear all of them mixed together and they all hear you.
+- **Groups**: any peer can create a named group (**Groups → New**) and pick
+  its members. The group appears on every member's device, and any member
+  can rename it, invite more peers (⋮ → *Edit / invite…*) or leave it.
+  Calling a group connects everyone online in it, and **everyone hears
+  everyone**, like a group conversation. Calling a group that is already
+  talking joins the call. Members that can't reach each other directly
+  (e.g. one on the LAN, one on a VPN) are heard through a member that
+  reaches both.
 - **Switch with one tap**: pick another peer and press Connect. The current
   line is hung up and the new one opens.
 - **See who is speaking**: each participant (and *You*) has a card that
@@ -163,11 +171,16 @@ the connection is closed. The frames below are what's inside.
 | `0x04` | AUDIO | PCM16 little-endian, mono, 16 kHz, about every 20 ms, **both directions** while connected |
 | `0x08/0x09` | PING / PONG | – (every second while connected; 8 s of silence = lost) |
 | `0x0A` | VIDEO | `[rotation:1][JPEG]`, about 640×480 at up to 15 fps while the camera is on; just the rotation byte = camera off. Only sent to peers whose HELLO has `"video":true` |
+| `0x0C` | GROUP | `{"id","name","members":[{"id","name"}],"updated","owner"}` (a group's details; the newest copy wins. HELLO lists `"groups":{id:updated}` so peers send newer copies on connect) |
+| `0x0D` | ROSTER | `{"groupId","members":[{"id","name","port","addrs"}]}` (group call: who the sender is connected to; the others connect to those with OPEN `"join":true`) |
+| `0x0E` | RELAY_AUDIO | `[id length:1][id][PCM]` (group call: audio of a member the receiver can't reach directly) |
 | `0x0B` | VIDEO_ACK | – (one per VIDEO frame; at most 2 unacknowledged pictures per peer, so video never queues up in front of the audio) |
 
 Each device is in at most one conversation, so a second caller gets *busy*.
 With *Everyone*, the caller is the hub: each member streams to the hub and the
-hub's mixer combines them. **All devices must run protocol v4** (this
+hub's mixer combines them. A group call is a mesh instead: OPEN carries
+`"groupId"`, every member connects to every other one and mixes what it
+hears. **All devices must run protocol v4** (this
 version, with encryption); older builds show as "Needs update".
 
 UDP discovery beacons (name, platform, port) stay unencrypted so intercoms can
@@ -243,7 +256,8 @@ portable Windows folder, Android APKs, and the headless node for 32-bit and
 
 1. Start the app on two or more devices on the **same LAN or Wi-Fi**. They
    appear in each other's list within about 2 seconds.
-2. Choose **Everyone** or one peer in the list and press **CONNECT**.
+2. Choose **Everyone**, a group or one peer in the list and press
+   **CONNECT**.
 3. The other side opens automatically (or rings, if it has *Answer
    automatically* turned off). Both of you can now talk and listen at the
    same time. The timer and level meters show the line is live.
