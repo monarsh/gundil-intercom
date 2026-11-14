@@ -93,8 +93,6 @@ class IntercomCore {
     bool? echoSuppression,
     List<SavedPeer> savedPeers = const [],
     this.onSavedPeersChanged,
-    Iterable<String> removedPeers = const [],
-    this.onRemovedPeersChanged,
     this.reconnectInterval = const Duration(seconds: 5),
     this.hooks = const PlatformHooks(),
   }) : _name = name, // ignore: prefer_initializing_formals
@@ -102,7 +100,6 @@ class IntercomCore {
        _speakerVolume = speakerVolume.clamp(0.0, maxVolume),
        _micVolume = micVolume.clamp(0.0, maxVolume),
        _saved = [...savedPeers],
-       _removed = {...removedPeers},
        // Android uses the phone's hardware echo canceller instead.
        echoSuppression = echoSuppression ?? !Platform.isAndroid,
        _mixer = AudioMixer(sampleRate: sampleRate),
@@ -132,9 +129,6 @@ class IntercomCore {
 
   /// Called whenever the saved peer list changes, so it can be persisted.
   final void Function(List<SavedPeer> saved)? onSavedPeersChanged;
-
-  /// Called whenever the removed (hidden) peer ids change, to persist them.
-  final void Function(List<String> removed)? onRemovedPeersChanged;
 
   /// How often offline saved peers are retried.
   final Duration reconnectInterval;
@@ -226,9 +220,6 @@ class IntercomCore {
 
   final List<SavedPeer> _saved;
 
-  /// Device ids the user removed from the list: not shown, and their
-  /// connections are refused, until added again (see [removePeer]).
-  final Set<String> _removed;
   final Set<String> _savedConnecting = {};
 
   final Map<String, Peer> _peers = {};
@@ -963,10 +954,10 @@ class IntercomCore {
     _savedChanged();
   }
 
-  /// Removes [entry] from the list, whether it's online or offline. If it's
-  /// a saved peer, it's unsaved; a known device is also hidden, so LAN
-  /// discovery doesn't bring it straight back and it can't connect, until
-  /// the user adds it again ([addSavedPeer]) or calls [restoreRemovedPeers].
+  /// Removes [entry] from the list, whether it's online or offline: it's
+  /// unsaved, any call with it ends and its connections close. Nothing is
+  /// blocked: if it's still on the network (discovery) or connects again,
+  /// it shows up again as a new, unsaved peer.
   void removePeer(PeerEntry entry) {
     final id = entry.peerId;
     final key = entry.saved?.key;
@@ -982,21 +973,8 @@ class IntercomCore {
       if (_target case PeerTarget(:final peerId) when peerId == id) {
         _target = const EveryoneTarget();
       }
-      if (_removed.add(id)) onRemovedPeersChanged?.call(removedPeers);
       _forget(id);
     }
-    changed();
-  }
-
-  /// Device ids removed with [removePeer].
-  List<String> get removedPeers => List.unmodifiable(_removed);
-
-  /// Shows every removed peer again (Settings → "Show removed peers").
-  void restoreRemovedPeers() {
-    if (_removed.isEmpty) return;
-    _removed.clear();
-    onRemovedPeersChanged?.call(removedPeers);
-    // Online ones reappear with their next discovery beacon.
     changed();
   }
 
@@ -1126,7 +1104,6 @@ class IntercomCore {
   }
 
   void _onBeacon(DiscoveryBeacon b) {
-    if (_removed.contains(b.id)) return;
     if (b.leaving) {
       final p = _peers[b.id];
       if (p != null) {
@@ -1206,10 +1183,10 @@ class IntercomCore {
   }) {
     _allConnections.add(c);
     if (incoming) {
-      // Say who we are only once we know who's calling (a removed peer is
-      // refused without ever seeing us). Something encrypted goes out at
-      // once all the same, so the caller learns right away whether the
-      // passwords match. Older versions ignore a ping before HELLO.
+      // Say who we are once we know who's calling. Something encrypted
+      // goes out at once all the same, so the caller learns right away
+      // whether the passwords match. Older versions ignore a ping before
+      // HELLO.
       _helloPending.add(c);
       c.send(Frame.empty(MessageType.ping));
     } else {
@@ -1306,10 +1283,6 @@ class IntercomCore {
         c.close();
         return;
       }
-      if (!_admit(id, explicit: onHello != null)) {
-        c.close();
-        return;
-      }
       if (_helloPending.remove(c)) c.send(_hello());
       c.remoteId = id;
       final p = _upsertPeer(
@@ -1372,17 +1345,6 @@ class IntercomCore {
 
   /// A plaintext frame from a version without encryption: learn who it is
   /// (shown as "Needs update") and refuse calls.
-  /// Whether a connection from device [id] may be used. A removed peer is
-  /// refused, unless the user just added it again by address ([explicit]:
-  /// the connection was made for a saved peer), which shows it again.
-  bool _admit(String id, {required bool explicit}) {
-    if (!_removed.contains(id)) return true;
-    if (!explicit) return false;
-    _removed.remove(id);
-    onRemovedPeersChanged?.call(removedPeers);
-    return true;
-  }
-
   void _onLegacyFrame(
     PeerConnection c,
     Frame f,
@@ -1395,7 +1357,7 @@ class IntercomCore {
     if (f.type != MessageType.hello) return;
     final m = f.json;
     final id = m['id'];
-    if (id is! String || id == selfId || !_admit(id, explicit: false)) {
+    if (id is! String || id == selfId) {
       c.close();
       return;
     }

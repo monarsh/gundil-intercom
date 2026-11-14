@@ -10,7 +10,8 @@ import 'ui/home_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final settings = await Settings.load();
+  final settings = await Settings.load()
+    ..forgetRemovedPeers();
   final service = IntercomService(
     selfId: settings.deviceId,
     name: settings.name,
@@ -23,8 +24,6 @@ Future<void> main() async {
     echoSuppression: settings.echoSuppression,
     savedPeers: settings.savedPeers,
     onSavedPeersChanged: (list) => settings.savedPeers = list,
-    removedPeers: settings.removedPeers,
-    onRemovedPeersChanged: (ids) => settings.removedPeers = ids,
   );
   await service.start();
   if (WindowBridge.supported) {

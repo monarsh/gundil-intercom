@@ -11,13 +11,7 @@ Future<void> eventually(bool Function() condition) async {
 
 void main() {
   late IntercomCore alice, bob;
-  late List<String> aliceRemoved;
-
-  IntercomCore node(
-    String id,
-    String name, {
-    void Function(List<String>)? onRemoved,
-  }) => IntercomCore(
+  IntercomCore node(String id, String name) => IntercomCore(
     selfId: id,
     name: name,
     audio: FakeAudioEngine(),
@@ -25,15 +19,13 @@ void main() {
     enableDiscovery: false,
     rogerBeep: false,
     echoSuppression: false,
-    onRemovedPeersChanged: onRemoved,
   );
 
   PeerEntry entryOf(IntercomCore c, String id) =>
       c.entries.firstWhere((e) => e.peerId == id);
 
   setUp(() async {
-    aliceRemoved = [];
-    alice = node('alice-id', 'Alice', onRemoved: (l) => aliceRemoved = l);
+    alice = node('alice-id', 'Alice');
     bob = node('bob-id', 'Bob');
     await Future.wait([alice.start(), bob.start()]);
   });
@@ -42,7 +34,7 @@ void main() {
     await Future.wait([alice.shutdown(), bob.shutdown()]);
   });
 
-  test('an online saved peer can be removed and stays away', () async {
+  test('an online saved peer can be removed', () async {
     expect(
       await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
       isTrue,
@@ -52,15 +44,23 @@ void main() {
     alice.removePeer(entryOf(alice, 'bob-id'));
     expect(alice.entries, isEmpty);
     expect(alice.savedPeers, isEmpty);
-    expect(aliceRemoved, ['bob-id']); // Persisted.
     await eventually(() => !(bob.peer('alice-id')?.connected ?? false));
+  });
 
-    // Bob connecting on his own doesn't bring him back.
+  test('a removed peer is not blocked: it can connect again', () async {
+    expect(
+      await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
+      isTrue,
+    );
+    alice.removePeer(entryOf(alice, 'bob-id'));
+    expect(alice.entries, isEmpty);
+
     expect(
       await bob.addSavedPeer(host: '127.0.0.1', port: alice.listenPort!),
-      isFalse,
+      isTrue,
     );
-    expect(alice.entries, isEmpty);
+    await eventually(() => alice.peer('bob-id')?.online ?? false);
+    expect(entryOf(alice, 'bob-id').isSaved, isFalse);
   });
 
   test('an online peer that was not saved can be removed', () async {
@@ -73,10 +73,7 @@ void main() {
     final e = entryOf(alice, 'bob-id');
     expect(e.isSaved, isFalse);
     alice.removePeer(e);
-    expect(alice.entries, isEmpty);
-    // His automatic retries are refused.
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    expect(alice.entries, isEmpty);
+    expect(alice.peer('bob-id'), isNull);
   });
 
   test('an offline peer can be removed', () async {
@@ -93,36 +90,17 @@ void main() {
     await bob.start();
   });
 
-  test('adding a removed peer again by address brings it back', () async {
+  test('a removed peer can be added again by address', () async {
     expect(
       await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
       isTrue,
     );
     alice.removePeer(entryOf(alice, 'bob-id'));
-    expect(alice.removedPeers, ['bob-id']);
-
     expect(
       await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
       isTrue,
     );
-    expect(alice.removedPeers, isEmpty);
-    expect(aliceRemoved, isEmpty);
     expect(entryOf(alice, 'bob-id').online, isTrue);
-  });
-
-  test('"Show removed peers" lets them connect again', () async {
-    expect(
-      await alice.addSavedPeer(host: '127.0.0.1', port: bob.listenPort!),
-      isTrue,
-    );
-    alice.removePeer(entryOf(alice, 'bob-id'));
-    alice.restoreRemovedPeers();
-    expect(alice.removedPeers, isEmpty);
-    expect(
-      await bob.addSavedPeer(host: '127.0.0.1', port: alice.listenPort!),
-      isTrue,
-    );
-    await eventually(() => alice.peer('bob-id')?.online ?? false);
   });
 
   test('removing a peer during a call hangs up with it', () async {

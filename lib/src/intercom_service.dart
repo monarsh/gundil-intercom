@@ -25,8 +25,6 @@ class IntercomService extends IntercomCore with ChangeNotifier {
     super.echoSuppression,
     super.savedPeers,
     super.onSavedPeersChanged,
-    super.removedPeers,
-    super.onRemovedPeersChanged,
     super.reconnectInterval,
   }) : super(hooks: const FlutterPlatformHooks()) {
     IntercomCore.log = debugPrint;

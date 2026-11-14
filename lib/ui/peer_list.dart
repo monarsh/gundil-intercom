@@ -263,18 +263,13 @@ class PeerList extends StatelessWidget {
   }
 
   Future<void> _remove(BuildContext context, PeerEntry e) async {
-    final known = e.peerId != null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text('Remove ${e.name}?'),
-        content: Text(
-          known
-              ? 'It disappears from the list, even while it is online, and '
-                    'can\'t connect to you. To get it back, add it again '
-                    'with "Add peer by IP", or use "Show removed peers" in '
-                    'Settings.'
-              : 'It is removed from your saved peers.',
+        content: const Text(
+          'It is removed from the list and any call with it ends. If it is '
+          'still on the network it can show up again.',
         ),
         actions: [
           TextButton(
